@@ -83,6 +83,7 @@ const sketch = function(p) {
     if (activeMode && typeof activeMode.reset === 'function') activeMode.reset();
     window._glitchActive    = false;
     window._glitchColorGrid = null;
+    window._glitchSizeGrid  = null;
   }
 
   function getPhosphorColor(brightness) {
@@ -131,11 +132,28 @@ const sketch = function(p) {
         if (isGlitch && window._glitchColorGrid && window._glitchColorGrid[r]) {
           // Glitch mode: CGA color, no chroma (it already has its own chaos)
           p.fill(cgaColors[(window._glitchColorGrid[r][c] || 0) % cgaColors.length]);
-          // 2×2 pixel bold
-          p.text(cell.char, px + jx,     py + jy);
-          p.text(cell.char, px + jx + 1, py + jy);
-          p.text(cell.char, px + jx,     py + jy + 1);
-          p.text(cell.char, px + jx + 1, py + jy + 1);
+
+          const sGrid    = window._glitchSizeGrid;
+          const sizeMult = (sGrid && sGrid[r]) ? (sGrid[r][c] || 1.0) : 1.0;
+
+          if (sizeMult > 1.02) {
+            // Draw oversized — shift up+left so the char grows out from cell center
+            const fs = Math.round(CONFIG.FONT_SIZE * sizeMult);
+            const ox = -(sizeMult - 1) * cellW * 0.5;
+            const oy = -(sizeMult - 1) * cellH * 0.5;
+            p.textSize(fs);
+            p.text(cell.char, px + ox + jx,     py + oy + jy);
+            p.text(cell.char, px + ox + 1 + jx, py + oy + jy);
+            p.text(cell.char, px + ox + jx,     py + oy + 1 + jy);
+            p.text(cell.char, px + ox + 1 + jx, py + oy + 1 + jy);
+            p.textSize(CONFIG.FONT_SIZE);
+          } else {
+            // Standard 2×2 pixel bold
+            p.text(cell.char, px + jx,     py + jy);
+            p.text(cell.char, px + jx + 1, py + jy);
+            p.text(cell.char, px + jx,     py + jy + 1);
+            p.text(cell.char, px + jx + 1, py + jy + 1);
+          }
         } else {
           const mainColor = getPhosphorColor(cell.brightness);
 
