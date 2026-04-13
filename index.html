@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  VIZZÍE v1.0 — Audio Reactive ASCII CRT Visualizer
+  GRONTIS.IO v1.1 — Audio Reactive ASCII CRT Visualizer
 
   Serving over HTTP is required for audio file access (not file://).
   To run locally:
@@ -19,13 +19,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VIZZÍE v1.0 [AUDIO REACTIVE]</title>
+  <title>GRONTIS.IO v1.11 [AUDIO TERMINAL]</title>
 
   <!-- CDN fallback if fonts/VT323-Regular.woff2 is not present locally -->
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
 
   <style>
-    /* Local font — takes priority over CDN. Place VT323-Regular.woff2 in fonts/ for offline use. */
+    @font-face {
+      font-family: 'GlassTTY';
+      src: url('fonts/Glass_TTY_VT220.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: block;
+    }
+
+    /* Fallback — VT323 from CDN if Glass TTY fails to load */
     @font-face {
       font-family: 'VT323';
       src: url('fonts/VT323-Regular.woff2') format('woff2'),
@@ -127,7 +135,7 @@
       width: 100%;
       height: 100%;
       z-index: 1;
-      object-fit: cover;
+      object-fit: fill;
       opacity: 0.5;
       display: none;
     }
@@ -262,7 +270,7 @@
   <!-- Title Bar -->
   <div id="title-bar">
     <span class="title-icon">▓</span>
-    <span class="title-text">VIZZÍE v1.0 [AUDIO REACTIVE]</span>
+    <span class="title-text">GRONTIS.IO v1.1 [AUDIO TERMINAL]</span>
     <button class="win-btn" tabindex="-1">─</button>
     <button class="win-btn" tabindex="-1">□</button>
     <button class="win-btn" tabindex="-1">✕</button>
@@ -295,6 +303,8 @@
       <button class="ctrl-btn" onclick="cyclePhosphor()"><span class="btn-key">[P]</span>PHOSPHOR</button>
       <button class="ctrl-btn" onclick="document.getElementById('audio-file-input').click()"><span class="btn-key">[A]</span>AUDIO FILE</button>
       <input type="file" id="audio-file-input" accept="audio/*" style="display:none" onchange="handleAudioFileInput(this)">
+      <button class="ctrl-btn" onclick="document.getElementById('font-file-input').click()"><span class="btn-key">[T]</span>FONT</button>
+      <input type="file" id="font-file-input" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="loadFontFile(this)">
       <button class="ctrl-btn" id="load-bg-btn" onclick="document.getElementById('bg-file-input').click()"><span class="btn-key">[L]</span>LOAD BG</button>
       <input type="file" id="bg-file-input" accept="image/*,video/*" style="display:none" onchange="loadBackgroundFile(this)">
       <button class="ctrl-btn" onclick="toggleBackground()"><span class="btn-key">[B]</span>BKGND</button>

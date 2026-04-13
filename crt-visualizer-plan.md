@@ -108,7 +108,7 @@ The control bar is styled to look like a degraded Netscape Navigator or Windows 
 
 ### Visual details
 - **Container:** dark gray `#1a1a1a` background, 2px inset bevel border (`#555` outer, `#000` inner), `Courier New` / `VT323` font
-- **Title bar:** Windows 95-style gradient from `#000080` to `#1084d0`, white text reading `VIZZÍE v1.0 [AUDIO REACTIVE]`, fake minimize/maximize/close buttons (decorative `─ □ ✕`)
+- **Title bar:** Windows 95-style gradient from `#000080` to `#1084d0`, white text reading `VIZZÍE v1.1 [AUDIO REACTIVE]`, fake minimize/maximize/close buttons (decorative `─ □ ✕`)
 - **Status bar:** bottom strip showing `FREQ: 441Hz | BPM: ~128 | MODE: MATRIX | PHO: GREEN | [DEMO]` — values update live
 - **Buttons:** beveled square buttons with active/depressed state; text in ALL CAPS; hover glows the active phosphor color
 - **Blinking cursor:** an `█` cursor blinks at 1 Hz in the status bar when in demo mode; stops when live audio is detected
@@ -117,7 +117,7 @@ The control bar is styled to look like a degraded Netscape Navigator or Windows 
 On first load, before any audio or mode is active, a scrolling boot log animates line by line into the grid (typewriter speed, ~40ms per line):
 
 ```
-VIZZÍE AUDIO TERMINAL v1.0
+GRONTIS.IO AUDIO TERMINAL v1.1
 (c) 1997 CRTLAB INDUSTRIES
 INITIALIZING FFT SUBSYSTEM............... OK
 LOADING PHOSPHOR PALETTE................. OK

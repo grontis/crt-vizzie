@@ -49,6 +49,32 @@ class AudioManager {
     Object.keys(this._bands).forEach(k => this._bands[k] = 0);
   }
 
+  // Load and loop an audio file from a URL path (e.g. '/audio/track.mp3').
+  // Returns a promise: 'live' | 'error'.
+  loadAudioUrl(url) {
+    this._cleanupFile();
+    return new Promise((resolve) => {
+      this._soundFile = new p5.SoundFile(
+        url,
+        () => {
+          const ctx = typeof getAudioContext === 'function' ? getAudioContext() : null;
+          if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+          this._fft = new p5.FFT(CONFIG.FFT_SMOOTHING, CONFIG.FFT_BINS);
+          this._soundFile.loop();
+          this._audioSource = 'file';
+          this._isMono = false;
+          this._resetBeatState();
+          console.log('[AudioManager] URL loaded:', url);
+          resolve('live');
+        },
+        (err) => {
+          console.warn('[AudioManager] Failed to load URL:', err);
+          resolve('error');
+        }
+      );
+    });
+  }
+
   // Load and loop a local audio file. Returns a promise: 'live' | 'error'.
   loadAudioFile(file) {
     this._cleanupFile();

@@ -1,11 +1,19 @@
-// config.js — Central configuration object for VIZZÍE v1.0
+// config.js — Central configuration object for GRONTIS.IO v1.1
 // All tuneable constants live here. No logic — pure data.
 
 const CONFIG = {
 
   // ── Font ──
-  FONT_FACE: 'VT323',
-  FONT_SIZE: 30,          // px — optimized for CRT composite output legibility
+  FONT_FACE: 'GlassTTY',
+  FONT_SIZE: 50,          // px — optimized for CRT composite output legibility
+  CHAR_SPACING: 1.15,     // multiplier on glyph width — adds horizontal breathing room
+  LINE_SPACING: 1.10,     // multiplier on font size for row height
+
+  // ── Text glitch rendering ──
+  CHROMA_BASE: 1,         // always-on chromatic aberration offset in pixels
+  CHROMA_BEAT: 4,         // additional px offset on beat (total = BASE + BEAT * intensity)
+  CHAR_JITTER_PX: 3.5,    // max per-character position jitter in pixels on beat
+  CHAR_JITTER_CHANCE: 0.31, // fraction of characters that jitter each frame on beat
 
   // ── Grid (computed at runtime in sketch.js, seeded here for reference) ──
   // cols and rows are derived from canvas size / cell dimensions
@@ -36,10 +44,10 @@ const CONFIG = {
 
   PEAK_DECAY: 0.015,        // spectrum peak hold decay per frame
 
-  MATRIX_SPEED_MIN: 0.3,
+  MATRIX_SPEED_MIN: 0.2,
   MATRIX_SPEED_MAX: 1.2,
-  MATRIX_BEAT_MULT: 2.0,    // speed multiplier on beat
-  MATRIX_TRAIL_LENGTH: 16,
+  MATRIX_BEAT_MULT: 3.5,    // speed multiplier on beat
+  MATRIX_TRAIL_LENGTH: 20,
 
   TUNNEL_RING_COUNT: 12,
   TUNNEL_BEAT_WARP: 0.7,    // radii multiplier on beat
@@ -54,11 +62,11 @@ const CONFIG = {
 
   VU_PEAK_DECAY: 0.008,     // VU peak needle decay per frame
 
-  GLITCH_DECAY_RATE: 0.02,  // brightness decay per frame in glitch buffer
-  GLITCH_SEED_INTERVAL: 180,// frames between buffer reseeds
-  GLITCH_SMEAR_CHANCE: 0.05,
-  GLITCH_TEAR_CHANCE: 0.015,
-  GLITCH_DROP_CHANCE: 0.03,
+  GLITCH_DECAY_RATE: 0.010,  // brightness decay per frame in glitch buffer
+  GLITCH_SEED_INTERVAL: 80, // frames between buffer reseeds
+  GLITCH_SMEAR_CHANCE: 0.10,
+  GLITCH_TEAR_CHANCE: 0.030,
+  GLITCH_DROP_CHANCE: 0.025,
 
   // ── Phosphor Presets ──
   PHOSPHORS: {
@@ -91,23 +99,25 @@ const CONFIG = {
   SHADE_CHARS: ' ░▒▓█',
 
   // ── Idle screen (shown when no audio source is active) ──
-  IDLE_CHAR_DELAY: 30,   // ms per character typed
-  IDLE_LINE_GAP: 150,    // ms pause between lines
+  IDLE_BOOT_DELAY: 3000,     // ms of blinking cursor before glitch starts
+  IDLE_GLITCH_DURATION: 800, // ms of noise animation before typewriter begins
+  IDLE_CHAR_DELAY: 30,       // ms per character typed
+  IDLE_LINE_GAP: 150,        // ms pause between lines
 
   IDLE_LINES: [
-    'VIZZÍE AUDIO TERMINAL v1.0',
-    '(c) 1997 CRTLAB INDUSTRIES',
+    'GRONTIS.IO AUDIO TERMINAL v1.1',
+    '(c) 1993 CYBERTRANCE INDUSTRIES',
     '',
-    'FFT SUBSYSTEM..................... OK',
-    'PHOSPHOR PALETTE.................. OK',
-    'SCANLINE RENDERER................. OK',
+    'FFT SUBSYSTEM..................... READY',
+    'PHOSPHOR PALETTE.................. READY',
+    'SCANLINE RENDERER................. READY',
     '',
-    '> SYSTEM READY.',
+    '> SYSTEM READY. (HACK THE PLANET)',
     '',
     '  DROP AUDIO FILE TO BEGIN',
     '  [A] BROWSE FILES   [D] DEMO MODE',
   ],
 
   // ── Canvas background overlay ──
-  CANVAS_BG_ALPHA: 150,  // translucent black drawn each frame (0–255) — lower = more background visible
+  CANVAS_BG_ALPHA: 125,  // translucent black drawn each frame (0–255) — lower = more background visible
 };

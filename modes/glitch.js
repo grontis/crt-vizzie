@@ -31,7 +31,7 @@ class GlitchMode {
   }
 
   _randomCGAChar() {
-    const chars = '!@#$%^&*[]{}|\\/<>?~`+=-_';
+    const chars = '!@#$%^&*[]{}|\\/<>?~`+=-_░▒▓█▄▀■□▪▫◘◙◄►▲▼◆◇○●';
     return chars[Math.floor(Math.random() * chars.length)];
   }
 
@@ -97,11 +97,12 @@ class GlitchMode {
     const bands = audio.getBands();
     const spectrum = audio.getSpectrum();
     const beatActive = audio.beatActive;
+    const beatIntensity = audio.beatIntensity;
     this._frameCount++;
 
     // Seed buffer periodically or on hard beat
     this._seedTimer++;
-    if (this._seedTimer >= CONFIG.GLITCH_SEED_INTERVAL || (beatActive && this._seedTimer > 30)) {
+    if (this._seedTimer >= CONFIG.GLITCH_SEED_INTERVAL || (beatActive && this._seedTimer > 20)) {
       this._seedTimer = 0;
       const choice = Math.floor(Math.random() * 3);
       if (choice === 0) {
@@ -130,8 +131,58 @@ class GlitchMode {
       }
     }
 
+    // Beat-triggered scatter burst — proportional to beat intensity
+    if (beatActive) {
+      const burstCount = Math.floor(beatIntensity * cols * rows * 0.06);
+      for (let i = 0; i < burstCount; i++) {
+        const r = Math.floor(Math.random() * rows);
+        const c = Math.floor(Math.random() * cols);
+        if (this._buffer[r]) {
+          this._buffer[r][c] = {
+            char: this._randomCGAChar(),
+            colorIdx: Math.floor(Math.random() * 16),
+            brightness: 0.7 + Math.random() * 0.3,
+          };
+        }
+      }
+
+      // Hard beat: blast a horizontal strip of chars
+      if (beatIntensity > 0.6) {
+        const blastRow = Math.floor(Math.random() * rows);
+        const blastLen = Math.floor(beatIntensity * cols * 0.7);
+        const blastStart = Math.floor(Math.random() * Math.max(1, cols - blastLen));
+        for (let c = blastStart; c < Math.min(cols, blastStart + blastLen); c++) {
+          if (this._buffer[blastRow]) {
+            this._buffer[blastRow][c] = {
+              char: this._randomCGAChar(),
+              colorIdx: Math.floor(Math.random() * 16),
+              brightness: 0.85 + Math.random() * 0.15,
+            };
+          }
+        }
+      }
+    }
+
+    // High treble/highMid energy injects scattered noise chars
+    const airEnergy = bands.highMid * 0.5 + bands.treble * 0.5;
+    if (airEnergy > 0.2) {
+      const noiseCount = Math.floor(airEnergy * cols * 0.15);
+      for (let i = 0; i < noiseCount; i++) {
+        const r = Math.floor(Math.random() * rows);
+        const c = Math.floor(Math.random() * cols);
+        if (this._buffer[r]) {
+          this._buffer[r][c] = {
+            char: this._randomCGAChar(),
+            colorIdx: Math.floor(Math.random() * 16),
+            brightness: 0.3 + Math.random() * 0.5,
+          };
+        }
+      }
+    }
+
     // Apply decay operations each frame
-    const bassWeight = Math.max(0.1, bands.bass);
+    const bassWeight = Math.max(0.15, bands.bass);
+    const totalEnergy = Math.max(0.1, (bands.bass + bands.mid + bands.treble) / 3);
 
     for (let r = 0; r < rows; r++) {
       if (!this._buffer[r]) continue;
@@ -139,33 +190,43 @@ class GlitchMode {
         const cell = this._buffer[r][c];
         if (!cell) continue;
 
-        // Brightness decay
-        cell.brightness = Math.max(0, cell.brightness - CONFIG.GLITCH_DECAY_RATE * bassWeight);
+        // Brightness decay — slower at low energy so chars accumulate
+        cell.brightness = Math.max(0, cell.brightness - CONFIG.GLITCH_DECAY_RATE * (0.4 + 0.6 * totalEnergy));
 
         // Horizontal smear: copy to right neighbor
         if (Math.random() < CONFIG.GLITCH_SMEAR_CHANCE * bassWeight && c + 1 < cols) {
           this._buffer[r][c + 1] = {
             char: cell.char,
             colorIdx: cell.colorIdx,
-            brightness: cell.brightness * 0.7,
+            brightness: cell.brightness * 0.75,
           };
         }
 
-        // CGA character substitution
-        if (Math.random() < 0.02 * bassWeight && cell.brightness > 0.1) {
+        // Downward smear driven by highMid/treble
+        if (Math.random() < CONFIG.GLITCH_SMEAR_CHANCE * 0.5 * airEnergy && r + 1 < rows) {
+          this._buffer[r + 1][c] = {
+            char: cell.char,
+            colorIdx: (cell.colorIdx + 1) % 16,
+            brightness: cell.brightness * 0.65,
+          };
+        }
+
+        // CGA character substitution — bass drives low chars, treble drives high-freq flicker
+        const substRate = 0.04 * bassWeight + 0.05 * bands.treble;
+        if (Math.random() < substRate && cell.brightness > 0.1) {
           cell.char = this._randomCGAChar();
           cell.colorIdx = Math.floor(Math.random() * 16);
         }
 
-        // Vertical tear: copy row up
+        // Vertical tear: copy row up — length scales with beat intensity
         if (Math.random() < CONFIG.GLITCH_TEAR_CHANCE * bassWeight && r > 0) {
-          const tearLength = Math.floor(Math.random() * 8) + 2;
+          const tearLength = Math.floor(Math.random() * 12 * (0.3 + beatIntensity)) + 2;
           for (let tc = c; tc < Math.min(cols, c + tearLength); tc++) {
             if (this._buffer[r - 1] && this._buffer[r][tc]) {
               this._buffer[r - 1][tc] = {
                 char: this._buffer[r][tc].char,
                 colorIdx: this._buffer[r][tc].colorIdx,
-                brightness: this._buffer[r][tc].brightness * 0.6,
+                brightness: this._buffer[r][tc].brightness * 0.65,
               };
             }
           }

@@ -15,6 +15,27 @@ class BackgroundLayer {
     this._isVideo = false;
   }
 
+  // Load a same-origin image path directly (no blob URL needed).
+  loadUrl(url) {
+    if (this._mediaEl.tagName !== 'IMG') {
+      // Replace video element with img if needed
+      const container = document.getElementById('canvas-container');
+      const img = document.createElement('img');
+      img.id = 'bg-media';
+      img.alt = '';
+      img.style.cssText = this._mediaEl.style.cssText;
+      container.insertBefore(img, this._mediaEl);
+      this._mediaEl.remove();
+      this._mediaEl = img;
+    }
+    this._isVideo  = false;
+    this._hasMedia = true;
+    this._visible  = false;
+    this._mediaEl.src = url;
+    this._mediaEl.style.display  = 'none';
+    this._mediaEl.style.opacity  = this._opacity;
+  }
+
   // Load a File object (from drag-and-drop)
   load(file) {
     if (!file) return;
