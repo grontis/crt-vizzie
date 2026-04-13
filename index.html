@@ -310,6 +310,7 @@
       <button class="ctrl-btn" onclick="toggleBackground()"><span class="btn-key">[B]</span>BKGND</button>
       <button class="ctrl-btn" onclick="toggleScanlines()"><span class="btn-key">[S]</span>SCANLINES</button>
       <button class="ctrl-btn" id="demo-btn" onclick="toggleDemo()"><span class="btn-key">[D]</span>DEMO MODE</button>
+      <button class="ctrl-btn" id="vj-sync-btn" onclick="toggleVJSync()"><span class="btn-key">[V]</span>VJ SYNC</button>
       <button class="ctrl-btn" onclick="toggleUI()"><span class="btn-key">[U]</span>UI</button>
       <button class="ctrl-btn" onclick="toggleFullscreen()"><span class="btn-key">[F]</span>FULLSCREEN</button>
     </div>
@@ -322,6 +323,7 @@
     <span class="status-item" id="status-mode">MODE: BOOT</span>
     <span class="status-item" id="status-pho">PHO: GREEN</span>
     <span class="status-item" id="status-src">[READY]</span>
+    <span class="status-item" id="status-vj" style="color:var(--phosphor-bright);font-weight:bold;"></span>
     <span class="status-item" id="status-cursor">█</span>
   </div>
 
@@ -341,6 +343,7 @@
   <script src="modes/tunnel.js"></script>
   <script src="modes/life.js"></script>
   <script src="modes/lissajous.js"></script>
+  <script src="vj-sync.js"></script>
   <script src="sketch.js"></script><!-- always last -->
 
 </body>

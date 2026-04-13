@@ -121,4 +121,24 @@ const CONFIG = {
 
   // ── Canvas background overlay ──
   CANVAS_BG_ALPHA: 100,  // translucent black drawn each frame (0–255) — lower = more background visible
+
+  // ── VJ Sync ──
+  VJ_SYNC: {
+    MODE_LIST:            [0, 1, 2, 3, 4, 5, 6, 7, 8], // all modes eligible for auto-switch
+    MODE_DWELL_MS:        3000,   // minimum ms between auto mode switches
+    PHOSPHOR_DWELL_MS:    4000,   // minimum ms between phosphor cycles
+    SCANLINES_ENABLED:    true,   // whether VJ sync auto-toggles scanlines
+    SCANLINE_DWELL_MS:    16000,  // minimum ms between scanline toggles
+    BG_PULSE_AMOUNT:      0.18,   // opacity delta added to background on kick
+    BG_PULSE_DECAY:       0.04,   // opacity units recovered per frame toward baseline
+    BG_TOGGLE_ENABLED:    true,   // whether VJ sync stutters background on treble peaks
+    BG_TREBLE_THRESH:     0.39,   // treble level that triggers a background stutter
+    BG_STUTTER_FRAMES:    14,     // total frames of stutter window (~230ms at 60fps)
+    BG_STUTTER_CHANCE:    0.45,   // per-frame probability of flipping visibility during stutter
+    BG_STUTTER_DWELL_MS:  1500,   // minimum ms between stutter events
+    KICK_SUB_THRESH:      0.50,   // bands.sub threshold for kick detection
+    KICK_BASS_THRESH:     0.40,   // bands.bass threshold for kick detection
+    SNARE_HIGHMID_THRESH: 0.35,   // bands.highMid threshold for snare detection
+    SNARE_BASS_MAX:       0.30,   // bands.bass must be BELOW this for snare (not a kick)
+  },
 };

@@ -15,6 +15,7 @@ window.toggleScanlines = null;
 window.toggleDemo = null;
 window.toggleUI = null;
 window.toggleFullscreen = null;
+window.toggleVJSync = null;
 
 // ── p5 Sketch ──
 const sketch = function(p) {
@@ -26,6 +27,7 @@ const sketch = function(p) {
 
   let audioManager;
   let backgroundLayer;
+  let vjSync;
 
   const modes = [];
   let currentModeIndex = 0;
@@ -358,6 +360,14 @@ const sketch = function(p) {
     const demoBtn = document.getElementById('demo-btn');
     if (demoBtn) demoBtn.classList.toggle('active', src === 'demo');
 
+    // VJ Sync button lit = VJ sync active
+    const vjBtn = document.getElementById('vj-sync-btn');
+    if (vjBtn) vjBtn.classList.toggle('active', vjSync && vjSync.enabled);
+
+    // VJ Sync status indicator
+    const vjEl = document.getElementById('status-vj');
+    if (vjEl) vjEl.textContent = (vjSync && vjSync.enabled) ? '[VJ]' : '';
+
     // Blinking cursor in status bar only when idle
     cursorEl.style.display = isIdle ? '' : 'none';
 
@@ -591,6 +601,27 @@ const sketch = function(p) {
 
     window.toggleScanlines = function() { showScanlines = !showScanlines; };
 
+    // ── VJ Sync ──
+    function _adjustBgOpacity(delta) {
+      backgroundLayer.adjustOpacity(delta);
+    }
+
+    function _getCurrentModeIndex() {
+      return currentModeIndex;
+    }
+
+    vjSync = new VJSyncManager(audioManager, {
+      activateMode:        activateMode,
+      cyclePhosphor:       window.cyclePhosphor,
+      toggleScanlines:     window.toggleScanlines,
+      toggleBackground:    () => backgroundLayer.toggle(),
+      getBgVisible:        () => backgroundLayer.isVisible,
+      adjustBgOpacity:     _adjustBgOpacity,
+      getCurrentModeIndex: _getCurrentModeIndex,
+    });
+
+    window.toggleVJSync = function() { vjSync.toggle(); updateStatusBar(); };
+
     window.toggleDemo = function() {
       if (audioManager.isDemo) {
         audioManager.stopAudio();   // demo → idle
@@ -668,6 +699,7 @@ const sketch = function(p) {
 
     // ── Active visualizer loop ──
     audioManager.update();
+    if (vjSync) vjSync.update(audioManager);
     backgroundLayer.update(cols, rows);
     activeMode.update(grid, cols, rows, audioManager, backgroundLayer);
     p.background(0, CONFIG.CANVAS_BG_ALPHA);
@@ -714,6 +746,7 @@ const sketch = function(p) {
       case 'S': window.toggleScanlines();  break;
       case 'F': window.toggleFullscreen(); break;
       case 'U': window.toggleUI();         break;
+      case 'V': if (window.toggleVJSync) window.toggleVJSync(); break;
       case '[': backgroundLayer.adjustOpacity(-CONFIG.BG_OPACITY_STEP); break;
       case ']': backgroundLayer.adjustOpacity( CONFIG.BG_OPACITY_STEP); break;
     }
