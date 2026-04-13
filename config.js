@@ -5,7 +5,7 @@ const CONFIG = {
 
   // ── Font ──
   FONT_FACE: 'GlassTTY',
-  FONT_SIZE: 50,          // px — optimized for CRT composite output legibility
+  FONT_SIZE: 40,          // px — optimized for CRT composite output legibility
   CHAR_SPACING: 1.15,     // multiplier on glyph width — adds horizontal breathing room
   LINE_SPACING: 1.10,     // multiplier on font size for row height
 
@@ -27,7 +27,7 @@ const CONFIG = {
   BPM_HISTORY: 8,          // number of beat intervals to keep for BPM median
 
   // ── Background ──
-  BG_DEFAULT_OPACITY: 0.85,
+  BG_DEFAULT_OPACITY: 1.0,
   BG_OPACITY_STEP: 0.05,
   BG_LUMA_INFLUENCE: 0.4,  // how much background luma biases morph figure selection (0–1)
 
@@ -57,7 +57,8 @@ const CONFIG = {
   LIFE_BEAT_BLOCK_SIZE: 5,  // random block toggled on beat
   LIFE_RESURRECT_BASS: 0.7, // bass threshold above which random cells resurrect
 
-  LISSAJOUS_TRAIL_LENGTH: 120,
+  LISSAJOUS_TRAIL_LENGTH: 480,   // total trail points kept across frames
+  LISSAJOUS_SAMPLES_PER_FRAME: 512, // waveform samples plotted each frame
   LISSAJOUS_MONO_TOLERANCE: 0.001,
 
   VU_PEAK_DECAY: 0.008,     // VU peak needle decay per frame
@@ -99,10 +100,10 @@ const CONFIG = {
   SHADE_CHARS: ' ░▒▓█',
 
   // ── Idle screen (shown when no audio source is active) ──
-  IDLE_BOOT_DELAY: 3000,     // ms of blinking cursor before glitch starts
-  IDLE_GLITCH_DURATION: 800, // ms of noise animation before typewriter begins
+  IDLE_BOOT_DELAY: 2500,     // ms of blinking cursor before glitch starts
+  IDLE_GLITCH_DURATION: 900, // ms of noise animation before typewriter begins
   IDLE_CHAR_DELAY: 30,       // ms per character typed
-  IDLE_LINE_GAP: 150,        // ms pause between lines
+  IDLE_LINE_GAP: 125,        // ms pause between lines
 
   IDLE_LINES: [
     'GRONTIS.IO AUDIO TERMINAL v1.1',
@@ -119,5 +120,5 @@ const CONFIG = {
   ],
 
   // ── Canvas background overlay ──
-  CANVAS_BG_ALPHA: 125,  // translucent black drawn each frame (0–255) — lower = more background visible
+  CANVAS_BG_ALPHA: 100,  // translucent black drawn each frame (0–255) — lower = more background visible
 };
