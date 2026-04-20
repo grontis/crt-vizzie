@@ -347,7 +347,7 @@ const sketch = function(p) {
       bpmEl.textContent  = 'BPM: ---';
     }
 
-    const modeNames = ['MATRIX', 'SPECTRUM', 'WAVEFORM', 'VU METER', 'MORPH', 'GLITCH', 'TUNNEL', 'LIFE', 'LISSAJOUS'];
+    const modeNames = ['MATRIX', 'SPECTRUM', 'WAVEFORM', 'VU METER', 'MORPH', 'GLITCH', 'TUNNEL', 'LIFE', 'LISSAJOUS', 'FUSION'];
     modeEl.textContent = 'MODE: ' + (isIdle ? 'IDLE' : (modeNames[currentModeIndex] || 'UNKNOWN'));
 
     phoEl.textContent = 'PHO: ' + currentPhosphor.toUpperCase();
@@ -538,6 +538,7 @@ const sketch = function(p) {
     modes.push(new TunnelMode(CONFIG));     // 6
     modes.push(new LifeMode(CONFIG));       // 7
     modes.push(new LissajousMode(CONFIG));  // 8
+    modes.push(new FusionMode(CONFIG));     // 9
 
     activeMode = modes[0];
 

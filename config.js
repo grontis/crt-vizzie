@@ -124,7 +124,7 @@ const CONFIG = {
 
   // ── VJ Sync ──
   VJ_SYNC: {
-    MODE_LIST:            [0, 1, 2, 3, 4, 5, 6, 7, 8], // all modes eligible for auto-switch
+    MODE_LIST:            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], // all modes eligible for auto-switch
     MODE_DWELL_MS:        3000,   // minimum ms between auto mode switches
     PHOSPHOR_DWELL_MS:    4000,   // minimum ms between phosphor cycles
     SCANLINES_ENABLED:    true,   // whether VJ sync auto-toggles scanlines
