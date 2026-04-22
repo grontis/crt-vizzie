@@ -83,9 +83,12 @@ const sketch = function(p) {
       Array.from({ length: cols }, () => ({ char: ' ', brightness: 0 }))
     );
     if (activeMode && typeof activeMode.reset === 'function') activeMode.reset();
-    window._glitchActive    = false;
-    window._glitchColorGrid = null;
-    window._glitchSizeGrid  = null;
+    window._glitchActive          = false;
+    window._glitchColorGrid       = null;
+    window._glitchSizeGrid        = null;
+    window._fusionGlitchActive    = false;
+    window._fusionGlitchColorGrid = null;
+    window._fusionGlitchSizeGrid  = null;
   }
 
   function getPhosphorColor(brightness) {
@@ -96,8 +99,9 @@ const sketch = function(p) {
   }
 
   function renderGrid() {
-    const isGlitch  = window._glitchActive && currentModeIndex === 0;
-    const cgaColors = CONFIG.CGA_COLORS;
+    const isGlitch       = window._glitchActive       && currentModeIndex === 0;
+    const isFusionGlitch = window._fusionGlitchActive && currentModeIndex === 1;
+    const cgaColors      = CONFIG.CGA_COLORS;
 
     // Audio state for reactive rendering — zero when idle
     const isActive      = audioManager && !audioManager.isIdle;
@@ -131,8 +135,16 @@ const sketch = function(p) {
           jy = (Math.random() - 0.5) *     jMag;
         }
 
+        // Determine per-cell whether to use Fusion CGA (glitch cells only when CGA is enabled)
+        let useFusionCGA   = false;
+        let fusionColorIdx = -1;
+        if (isFusionGlitch && window._fusionGlitchColorGrid && window._fusionGlitchColorGrid[r]) {
+          fusionColorIdx = window._fusionGlitchColorGrid[r][c];
+          useFusionCGA   = fusionColorIdx >= 0;
+        }
+
         if (isGlitch && window._glitchColorGrid && window._glitchColorGrid[r]) {
-          // Glitch mode: CGA color, no chroma (it already has its own chaos)
+          // GlitchMode (mode 0): CGA color — full grid, no sentinel needed
           p.fill(cgaColors[(window._glitchColorGrid[r][c] || 0) % cgaColors.length]);
 
           const sGrid    = window._glitchSizeGrid;
@@ -156,7 +168,31 @@ const sketch = function(p) {
             p.text(cell.char, px + jx,     py + jy + 1);
             p.text(cell.char, px + jx + 1, py + jy + 1);
           }
+        } else if (useFusionCGA) {
+          // FusionMode glitch cell: CGA color + size grid
+          p.fill(cgaColors[fusionColorIdx % cgaColors.length]);
+
+          const fsGrid    = window._fusionGlitchSizeGrid;
+          const fsizeMult = (fsGrid && fsGrid[r]) ? (fsGrid[r][c] || 1.0) : 1.0;
+
+          if (fsizeMult > 1.02) {
+            const fs = Math.round(CONFIG.FONT_SIZE * fsizeMult);
+            const ox = -(fsizeMult - 1) * cellW * 0.5;
+            const oy = -(fsizeMult - 1) * cellH * 0.5;
+            p.textSize(fs);
+            p.text(cell.char, px + ox + jx,     py + oy + jy);
+            p.text(cell.char, px + ox + 1 + jx, py + oy + jy);
+            p.text(cell.char, px + ox + jx,     py + oy + 1 + jy);
+            p.text(cell.char, px + ox + 1 + jx, py + oy + 1 + jy);
+            p.textSize(CONFIG.FONT_SIZE);
+          } else {
+            p.text(cell.char, px + jx,     py + jy);
+            p.text(cell.char, px + jx + 1, py + jy);
+            p.text(cell.char, px + jx,     py + jy + 1);
+            p.text(cell.char, px + jx + 1, py + jy + 1);
+          }
         } else {
+          // Phosphor path — figure cells, rain cells, and glitch cells when CGA is off
           const mainColor = getPhosphorColor(cell.brightness);
 
           // Chromatic aberration: warm fringe left, cool fringe right
@@ -176,7 +212,8 @@ const sketch = function(p) {
         }
       }
     }
-    window._glitchActive = false;
+    window._glitchActive       = false;
+    window._fusionGlitchActive = false;
   }
 
   function drawScanlines() {

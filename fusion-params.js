@@ -24,6 +24,7 @@ window.FUSION_PARAMS = {
   figBrightness:   0.65,   // brightness when a figure is first stamped in
   // default: FIG_SMEAR = 0.025
   figSmear:        0.025,  // per-cell chance per frame to smear char to right neighbor
+  figOpacity:      1.0,    // global brightness multiplier for figure cells (0–1)
 
   // ── Rain layer ────────────────────────────────────────────────────────────
   // default: RAIN_SPEED_MIN = 0.15
@@ -38,6 +39,7 @@ window.FUSION_PARAMS = {
   rainInteract:  0.50,  // chance the rain head borrows the figure char it overlaps
   // default: RAIN_BURN_BOOST = 0.20
   rainBurnBoost: 0.20,  // brightness added to figure cell when rain head touches it
+  rainOpacity:   1.0,   // global brightness multiplier for rain cells (0–1)
 
   // ── Glitch layer ──────────────────────────────────────────────────────────
   // default: GLI_THRESHOLD = 0.62
@@ -48,6 +50,8 @@ window.FUSION_PARAMS = {
   glitchScatter:   0.045,  // fraction of cells scattered on a hard beat
   // default: GLI_TEAR = 0.020
   glitchTear:      0.020,  // per-row horizontal tear probability on beat
+  glitchSeedInterval: 80,  // frames between timer-based content reseeds
+  glitchCgaEnabled:   true, // use CGA 16-color palette on glitch cells; false = phosphor
 
   // ── Background layer ──────────────────────────────────────────────────────
   // default: BG_KICK_SUB = 0.50
@@ -114,6 +118,7 @@ window.FUSION_PARAM_RANGES = {
   figReseedFrames: { min: 40,    max: 400   },
   figBrightness:   { min: 0.1,   max: 1.0   },
   figSmear:        { min: 0,     max: 0.1   },
+  figOpacity:      { min: 0,     max: 1.0   },
 
   // Rain layer
   rainSpeedMin:    { min: 0.05,  max: 0.5   },
@@ -122,12 +127,14 @@ window.FUSION_PARAM_RANGES = {
   rainTrail:       { min: 4,     max: 30    },
   rainInteract:    { min: 0,     max: 1.0   },
   rainBurnBoost:   { min: 0,     max: 0.5   },
+  rainOpacity:     { min: 0,     max: 1.0   },
 
   // Glitch layer
   glitchThreshold: { min: 0.3,   max: 0.95  },
   glitchChance:    { min: 0.05,  max: 1.0   },
   glitchScatter:   { min: 0,     max: 0.15  },
   glitchTear:      { min: 0,     max: 0.05  },
+  glitchSeedInterval: { min: 20, max: 300 },
 
   // Background modulation layer
   bgKickSub:       { min: 0.1,   max: 0.9   },

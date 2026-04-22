@@ -356,26 +356,40 @@
 
     // FIGURE section
     body.appendChild(_makeSection('FIGURE', 'figureEnabled', [
-      { label: 'DECAY',  key: 'figDecay',        min: 0.001, max: 0.03,  step: 0.001 },
-      { label: 'BRIGHT', key: 'figBrightness',   min: 0.1,   max: 1.0,   step: 0.01  },
-      { label: 'SMEAR',  key: 'figSmear',         min: 0,     max: 0.1,   step: 0.001 },
-      { label: 'RESEED', key: 'figReseedFrames',  min: 40,    max: 400,   step: 10    },
+      { label: 'DECAY',   key: 'figDecay',        min: 0.001, max: 0.03,  step: 0.001 },
+      { label: 'BRIGHT',  key: 'figBrightness',   min: 0.1,   max: 1.0,   step: 0.01  },
+      { label: 'OPACITY', key: 'figOpacity',       min: 0,     max: 1.0,   step: 0.01  },
+      { label: 'SMEAR',   key: 'figSmear',         min: 0,     max: 0.1,   step: 0.001 },
+      { label: 'RESEED',  key: 'figReseedFrames',  min: 40,    max: 400,   step: 10    },
     ]));
 
     // RAIN section — note: keep SPD MIN < SPD MAX
     body.appendChild(_makeSection('RAIN', 'rainEnabled', [
       { label: 'SPD MIN', key: 'rainSpeedMin',  min: 0.05, max: 0.5,  step: 0.01 },
       { label: 'SPD MAX', key: 'rainSpeedMax',  min: 0.3,  max: 2.0,  step: 0.05 },
+      { label: 'OPACITY', key: 'rainOpacity',   min: 0,    max: 1.0,  step: 0.01 },
       { label: 'TRAIL',   key: 'rainTrail',     min: 4,    max: 30,   step: 1    },
       { label: 'BEAT',    key: 'rainBeatMult',  min: 1.0,  max: 6.0,  step: 0.1  },
     ]));
 
-    // GLITCH section
-    body.appendChild(_makeSection('GLITCH', 'glitchEnabled', [
-      { label: 'THRESH',  key: 'glitchThreshold', min: 0.3,  max: 0.95, step: 0.01  },
-      { label: 'CHANCE',  key: 'glitchChance',    min: 0.05, max: 1.0,  step: 0.05  },
-      { label: 'SCATTER', key: 'glitchScatter',   min: 0,    max: 0.15, step: 0.005 },
-    ]));
+    // GLITCH section — SEED IV slider and CGA toggle added alongside existing controls
+    const glitchSection = _makeSection('GLITCH', 'glitchEnabled', [
+      { label: 'THRESH',  key: 'glitchThreshold',  min: 0.3,  max: 0.95,  step: 0.01  },
+      { label: 'CHANCE',  key: 'glitchChance',     min: 0.05, max: 1.0,   step: 0.05  },
+      { label: 'SCATTER', key: 'glitchScatter',    min: 0,    max: 0.15,  step: 0.005 },
+      { label: 'SEED IV', key: 'glitchSeedInterval', min: 20, max: 300,   step: 10    },
+    ]);
+    // Add CGA toggle in the section header row
+    const glitchHeader = glitchSection.querySelector('.fp-section-header');
+    if (glitchHeader) {
+      const cgaLabel = document.createElement('span');
+      cgaLabel.className = 'fp-slider-label';
+      cgaLabel.style.marginLeft = '8px';
+      cgaLabel.textContent = 'CGA:';
+      glitchHeader.appendChild(cgaLabel);
+      glitchHeader.appendChild(_makeToggle('glitchCgaEnabled'));
+    }
+    body.appendChild(glitchSection);
 
     // BG MOD section (background modulation — flat FUSION_PARAMS keys)
     body.appendChild(_makeSection('BG MOD', 'bgEnabled', [
