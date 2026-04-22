@@ -35,6 +35,15 @@ class BackgroundFX {
     this._corruptCooldown = 0;
   }
 
+  // Hides the FX canvas and restores the raw media element. Called when not in Fusion mode.
+  hide() {
+    this._canvas.style.display = 'none';
+    const bg = this._bg;
+    if (bg.hasMedia && bg.mediaElement) {
+      bg.mediaElement.style.display = bg.isVisible ? 'block' : 'none';
+    }
+  }
+
   // Called each frame from sketch.js draw loop after backgroundLayer.update()
   update(audioManager) {
     const bgFx = window.FUSION_PARAMS && window.FUSION_PARAMS.bgFx;

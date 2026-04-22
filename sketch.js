@@ -728,7 +728,10 @@ const sketch = function(p) {
       fusionAutomation.update(audioManager);
     }
     backgroundLayer.update(cols, rows);
-    if (backgroundFX) backgroundFX.update(audioManager);
+    if (backgroundFX) {
+      if (currentModeIndex === 9) backgroundFX.update(audioManager);
+      else backgroundFX.hide();
+    }
     activeMode.update(grid, cols, rows, audioManager, backgroundLayer);
     p.background(0, CONFIG.CANVAS_BG_ALPHA);
     renderGrid();
