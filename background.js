@@ -150,4 +150,6 @@ class BackgroundLayer {
   get isVisible() { return this._visible; }
   get opacity() { return this._opacity; }
   get hasMedia() { return this._hasMedia; }
+  get mediaElement() { return this._mediaEl; }
+  get isVideo() { return this._isVideo; }
 }

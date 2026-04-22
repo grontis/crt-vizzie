@@ -144,6 +144,16 @@
       display: none;
     }
 
+    #bg-fx-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1 !important;
+      display: none;
+    }
+
     /* ── Button Bar ── */
     #button-bar {
       height: var(--chrome-height-bottom);
@@ -280,6 +290,8 @@
   <div id="canvas-container">
     <!-- Background media element — z-index 1, behind canvas -->
     <img id="bg-media" alt="">
+    <!-- FX canvas — pixel pipeline output, shown when BackgroundFX is active -->
+    <canvas id="bg-fx-canvas"></canvas>
     <!-- Hidden sampling canvas (populated by background.js) -->
     <canvas id="bg-sample"></canvas>
     <!-- p5.js canvas inserted here by sketch.js — z-index 2 -->
@@ -325,6 +337,8 @@
     <span class="status-item" id="status-pho">PHO: GREEN</span>
     <span class="status-item" id="status-src">[READY]</span>
     <span class="status-item" id="status-vj" style="color:var(--phosphor-bright);font-weight:bold;"></span>
+    <span class="status-item" id="status-fusion" style="display:none;color:var(--phosphor-dim);">[TAB] PARAMS</span>
+    <span class="status-item" id="status-snap" style="display:none;color:var(--phosphor-bright);font-weight:bold;"></span>
     <span class="status-item" id="status-cursor">█</span>
   </div>
 
@@ -335,6 +349,8 @@
   <script src="audio.js"></script>
   <script src="background.js"></script>
   <script src="ascii-art.js"></script>
+  <script src="fusion-params.js"></script>
+  <script src="background-fx.js"></script>
   <script src="modes/matrix.js"></script>
   <script src="modes/spectrum.js"></script>
   <script src="modes/waveform.js"></script>
@@ -345,6 +361,8 @@
   <script src="modes/life.js"></script>
   <script src="modes/lissajous.js"></script>
   <script src="modes/fusion.js"></script>
+  <script src="fusion-panel.js"></script>
+  <script src="fusion-automation.js"></script>
   <script src="vj-sync.js"></script>
   <script src="sketch.js"></script><!-- always last -->
 

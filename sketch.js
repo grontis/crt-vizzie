@@ -27,7 +27,9 @@ const sketch = function(p) {
 
   let audioManager;
   let backgroundLayer;
+  let backgroundFX;
   let vjSync;
+  let fusionAutomation;
 
   const modes = [];
   let currentModeIndex = 0;
@@ -368,6 +370,22 @@ const sketch = function(p) {
     const vjEl = document.getElementById('status-vj');
     if (vjEl) vjEl.textContent = (vjSync && vjSync.enabled) ? '[VJ]' : '';
 
+    // Fusion panel hint — shown only when Fusion mode is active and audio is running
+    const fusionHintEl = document.getElementById('status-fusion');
+    if (fusionHintEl) fusionHintEl.style.display = (currentModeIndex === 9 && !isIdle) ? '' : 'none';
+
+    // Snapshot slot indicator — shown only in Fusion mode with audio active
+    const snapEl = document.getElementById('status-snap');
+    if (snapEl) {
+      if (currentModeIndex === 9 && fusionAutomation && !isIdle) {
+        snapEl.textContent = '[SNAP: ' + (fusionAutomation.currentSlot + 1) + ']';
+        snapEl.style.display = '';
+      } else {
+        snapEl.textContent = '';
+        snapEl.style.display = 'none';
+      }
+    }
+
     // Blinking cursor in status bar only when idle
     cursorEl.style.display = isIdle ? '' : 'none';
 
@@ -387,9 +405,11 @@ const sketch = function(p) {
   // ── Mode control ──────────────────────────────────────────────────────────
 
   function activateMode(index) {
+    if (window.hideFusionPanel) window.hideFusionPanel(); // close panel on any mode switch
     currentModeIndex = index;
     activeMode = modes[index];
     if (activeMode && typeof activeMode.reset === 'function') activeMode.reset();
+    if (fusionAutomation) fusionAutomation.reset();
     if (index !== 5) window._glitchActive = false;
     updateModeButtons();
   }
@@ -525,6 +545,7 @@ const sketch = function(p) {
 
     audioManager    = new AudioManager();   // starts in 'idle'
     backgroundLayer = new BackgroundLayer();
+    backgroundFX    = new BackgroundFX(backgroundLayer);
     backgroundLayer.loadUrl('/background_images/lminalpool.jpg');
     resetIdleAnimation();
     fetchAudioFileList();  // non-blocking — populates audioFiles when ready
@@ -621,6 +642,8 @@ const sketch = function(p) {
       getCurrentModeIndex: _getCurrentModeIndex,
     });
 
+    fusionAutomation = window.fusionAutomation;
+
     window.toggleVJSync = function() { vjSync.toggle(); updateStatusBar(); };
 
     window.toggleDemo = function() {
@@ -701,7 +724,11 @@ const sketch = function(p) {
     // ── Active visualizer loop ──
     audioManager.update();
     if (vjSync) vjSync.update(audioManager);
+    if (fusionAutomation && currentModeIndex === 9) {
+      fusionAutomation.update(audioManager);
+    }
     backgroundLayer.update(cols, rows);
+    if (backgroundFX) backgroundFX.update(audioManager);
     activeMode.update(grid, cols, rows, audioManager, backgroundLayer);
     p.background(0, CONFIG.CANVAS_BG_ALPHA);
     renderGrid();
@@ -710,8 +737,6 @@ const sketch = function(p) {
   };
 
   p.keyPressed = function() {
-    if (p.keyCode === 9) return false; // handle Tab below
-
     const key     = p.key;
     const keyCode = p.keyCode;
 
@@ -752,9 +777,27 @@ const sketch = function(p) {
       case ']': backgroundLayer.adjustOpacity( CONFIG.BG_OPACITY_STEP); break;
     }
 
-    // Tab cycles modes (only when active)
+    // Snapshot slot cycling — Fusion mode only, requires audio active
+    if (p.key === '.' && currentModeIndex === 9 && fusionAutomation && !audioManager.isIdle) {
+      fusionAutomation.nextSlot();
+      updateStatusBar();
+      return false;
+    }
+    if (p.key === ',' && currentModeIndex === 9 && fusionAutomation && !audioManager.isIdle) {
+      fusionAutomation.prevSlot();
+      updateStatusBar();
+      return false;
+    }
+
+    // Tab — open/close Fusion panel when Fusion is active; otherwise cycle modes
     if (keyCode === 9) {
-      if (!audioManager.isIdle) activateMode((currentModeIndex + 1) % modes.length);
+      if (!audioManager.isIdle) {
+        if (currentModeIndex === 9) {
+          if (window.toggleFusionPanel) window.toggleFusionPanel();
+        } else {
+          activateMode((currentModeIndex + 1) % modes.length);
+        }
+      }
       return false;
     }
   };
