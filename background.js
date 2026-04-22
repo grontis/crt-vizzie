@@ -1,5 +1,6 @@
 // background.js — BackgroundLayer class
 // Manages a background <img>/<video> DOM element and a hidden 2D canvas for luma sampling.
+// Supports a playlist of multiple media items (images and/or videos).
 
 class BackgroundLayer {
   constructor() {
@@ -13,48 +14,28 @@ class BackgroundLayer {
     this._opacity = CONFIG.BG_DEFAULT_OPACITY;
     this._hasMedia = false;
     this._isVideo = false;
+
+    // Playlist state
+    // Each entry: { url: string|null, blobUrl: string|null, isVideo: boolean, name: string }
+    // url is the src string (path or blob: URL). blobUrl tracks blob: URLs created by this class.
+    this._playlist = [];
+    this._playlistIndex = -1;
   }
 
-  // Load a same-origin image path directly (no blob URL needed).
-  loadUrl(url) {
-    if (this._mediaEl.tagName !== 'IMG') {
-      // Replace video element with img if needed
+  // ── Private: navigate to a playlist entry by index ───────────────────────
+
+  _goTo(index) {
+    if (this._playlist.length === 0 || index < 0 || index >= this._playlist.length) return;
+
+    const entry = this._playlist[index];
+    const isVideo = entry.isVideo;
+
+    // Swap DOM element type if needed (img ↔ video)
+    if (isVideo !== this._isVideo) {
       const container = document.getElementById('canvas-container');
-      const img = document.createElement('img');
-      img.id = 'bg-media';
-      img.alt = '';
-      img.style.cssText = this._mediaEl.style.cssText;
-      container.insertBefore(img, this._mediaEl);
-      this._mediaEl.remove();
-      this._mediaEl = img;
-    }
-    this._isVideo  = false;
-    this._hasMedia = true;
-    this._visible  = false;
-    this._mediaEl.src = url;
-    this._mediaEl.style.display  = 'none';
-    this._mediaEl.style.opacity  = this._opacity;
-  }
+      const oldEl = this._mediaEl;
 
-  // Load a File object (from drag-and-drop)
-  load(file) {
-    if (!file) return;
-
-    // Clean up previous blob URL
-    if (this._blobUrl) {
-      URL.revokeObjectURL(this._blobUrl);
-    }
-
-    this._blobUrl = URL.createObjectURL(file);
-    this._isVideo = file.type.startsWith('video/');
-
-    // Replace <img> with <video> or vice versa as needed
-    const container = document.getElementById('canvas-container');
-    const oldEl = this._mediaEl;
-
-    if (this._isVideo) {
-      // Convert to video element if not already
-      if (this._mediaEl.tagName !== 'VIDEO') {
+      if (isVideo) {
         const video = document.createElement('video');
         video.id = 'bg-media';
         video.loop = true;
@@ -65,12 +46,7 @@ class BackgroundLayer {
         container.insertBefore(video, oldEl);
         oldEl.remove();
         this._mediaEl = video;
-      }
-      this._mediaEl.src = this._blobUrl;
-      this._mediaEl.play().catch(() => {});
-    } else {
-      // Convert to img element if not already
-      if (this._mediaEl.tagName !== 'IMG') {
+      } else {
         const img = document.createElement('img');
         img.id = 'bg-media';
         img.alt = '';
@@ -79,14 +55,77 @@ class BackgroundLayer {
         oldEl.remove();
         this._mediaEl = img;
       }
-      this._mediaEl.src = this._blobUrl;
     }
 
+    this._mediaEl.src = entry.url;
+    if (isVideo) {
+      this._mediaEl.loop = true;
+      this._mediaEl.muted = true;
+      this._mediaEl.autoplay = true;
+      this._mediaEl.playsInline = true;
+      this._mediaEl.play().catch(() => {});
+    }
+
+    this._isVideo = isVideo;
     this._hasMedia = true;
+    this._playlistIndex = index;
+    this._mediaEl.style.opacity = this._opacity;
+    // Visibility (_visible, display) is the caller's responsibility — _goTo does not change it.
+  }
+
+  // ── Public: playlist management ───────────────────────────────────────────
+
+  // Add a same-origin URL (or any URL string) to the playlist.
+  // Does NOT force visibility — caller controls when to show.
+  addUrl(url, name) {
+    const entryName = name || url.split('/').pop();
+    const isVideo = /\.(mp4|webm|ogg)$/i.test(url);
+    this._playlist.push({ url, blobUrl: null, isVideo, name: entryName });
+    if (this._playlist.length === 1) {
+      // First item — load it into the DOM (invisible until toggled)
+      this._goTo(0);
+    }
+    return this._playlist.length - 1;
+  }
+
+  // Add a File object to the playlist. Forces visibility (mirrors original load() behavior).
+  addFile(file) {
+    const blobUrl = URL.createObjectURL(file);
+    const isVideo = file.type.startsWith('video/');
+    this._playlist.push({ url: blobUrl, blobUrl, isVideo, name: file.name });
+    this._goTo(this._playlist.length - 1);
+    // File additions always make the background visible
     this._visible = true;
     this._mediaEl.style.display = 'block';
-    this._mediaEl.style.opacity = this._opacity;
+    return this._playlist.length - 1;
   }
+
+  // Navigate to the next playlist item (wraps around).
+  next() {
+    if (this._playlist.length < 2) return;
+    this._goTo((this._playlistIndex + 1) % this._playlist.length);
+  }
+
+  // Navigate to the previous playlist item (wraps around).
+  prev() {
+    if (this._playlist.length < 2) return;
+    this._goTo((this._playlistIndex - 1 + this._playlist.length) % this._playlist.length);
+  }
+
+  // ── Backward-compat wrappers ──────────────────────────────────────────────
+
+  // Load a same-origin image path directly (backward compat — calls addUrl).
+  loadUrl(url) {
+    this.addUrl(url, url.split('/').pop());
+  }
+
+  // Load a File object (backward compat — calls addFile).
+  load(file) {
+    if (!file) return;
+    this.addFile(file);
+  }
+
+  // ── Frame update & sampling ───────────────────────────────────────────────
 
   // Called each frame from sketch.js draw loop
   update(cols, rows) {
@@ -130,6 +169,8 @@ class BackgroundLayer {
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   }
 
+  // ── Opacity & visibility ──────────────────────────────────────────────────
+
   setOpacity(value) {
     this._opacity = Math.max(0, Math.min(1, value));
     if (this._mediaEl) {
@@ -147,9 +188,13 @@ class BackgroundLayer {
     this._mediaEl.style.display = this._visible ? 'block' : 'none';
   }
 
-  get isVisible() { return this._visible; }
-  get opacity() { return this._opacity; }
-  get hasMedia() { return this._hasMedia; }
-  get mediaElement() { return this._mediaEl; }
-  get isVideo() { return this._isVideo; }
+  // ── Getters ───────────────────────────────────────────────────────────────
+
+  get isVisible()      { return this._visible; }
+  get opacity()        { return this._opacity; }
+  get hasMedia()       { return this._hasMedia; }
+  get mediaElement()   { return this._mediaEl; }
+  get isVideo()        { return this._isVideo; }
+  get playlistLength() { return this._playlist.length; }
+  get playlistIndex()  { return this._playlistIndex; }
 }

@@ -29,39 +29,13 @@ const CONFIG = {
   // ── Background ──
   BG_DEFAULT_OPACITY: 1.0,
   BG_OPACITY_STEP: 0.05,
-  BG_LUMA_INFLUENCE: 0.4,  // how much background luma biases morph figure selection (0–1)
-
   // ── Scanlines ──
   SCANLINE_ALPHA: 0.33,    // opacity of the scanline overlay
   SCANLINE_SPACING: 4,     // draw a line every N pixels
 
   // ── Modes ──
-  MORPH_WIDTH: 40,
-  MORPH_HEIGHT: 20,
-  MORPH_NOISE_CHARS: '!@#$%^&*<>?/\\|~`abcdefghijklmnopqrstuvwxyz0123456789',
-  MORPH_TWEEN_SPEED: 0.015, // tweenProgress increment per frame (beat overrides)
-  MORPH_SHIMMER_CHANCE: 0.04, // chance per stable cell per frame of treble shimmer
-
-  PEAK_DECAY: 0.015,        // spectrum peak hold decay per frame
-
-  MATRIX_SPEED_MIN: 0.2,
-  MATRIX_SPEED_MAX: 1.2,
-  MATRIX_BEAT_MULT: 3.5,    // speed multiplier on beat
-  MATRIX_TRAIL_LENGTH: 20,
-
-  TUNNEL_RING_COUNT: 12,
-  TUNNEL_BEAT_WARP: 0.7,    // radii multiplier on beat
-  TUNNEL_WARP_EASE: 0.08,   // easing speed back from warp
-  TUNNEL_BASE_SPEED: 0.4,
-
-  LIFE_BEAT_BLOCK_SIZE: 5,  // random block toggled on beat
-  LIFE_RESURRECT_BASS: 0.7, // bass threshold above which random cells resurrect
-
-  LISSAJOUS_TRAIL_LENGTH: 480,   // total trail points kept across frames
-  LISSAJOUS_SAMPLES_PER_FRAME: 512, // waveform samples plotted each frame
-  LISSAJOUS_MONO_TOLERANCE: 0.001,
-
-  VU_PEAK_DECAY: 0.008,     // VU peak needle decay per frame
+  MORPH_WIDTH: 40,   // ASCII art stamp width — used by glitch.js and fusion.js
+  MORPH_HEIGHT: 20,  // ASCII art stamp height — used by glitch.js and fusion.js
 
   GLITCH_DECAY_RATE: 0.010,  // brightness decay per frame in glitch buffer
   GLITCH_SEED_INTERVAL: 80, // frames between buffer reseeds
@@ -122,23 +96,4 @@ const CONFIG = {
   // ── Canvas background overlay ──
   CANVAS_BG_ALPHA: 100,  // translucent black drawn each frame (0–255) — lower = more background visible
 
-  // ── VJ Sync ──
-  VJ_SYNC: {
-    MODE_LIST:            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], // all modes eligible for auto-switch
-    MODE_DWELL_MS:        3000,   // minimum ms between auto mode switches
-    PHOSPHOR_DWELL_MS:    4000,   // minimum ms between phosphor cycles
-    SCANLINES_ENABLED:    true,   // whether VJ sync auto-toggles scanlines
-    SCANLINE_DWELL_MS:    16000,  // minimum ms between scanline toggles
-    BG_PULSE_AMOUNT:      0.18,   // opacity delta added to background on kick
-    BG_PULSE_DECAY:       0.04,   // opacity units recovered per frame toward baseline
-    BG_TOGGLE_ENABLED:    true,   // whether VJ sync stutters background on treble peaks
-    BG_TREBLE_THRESH:     0.39,   // treble level that triggers a background stutter
-    BG_STUTTER_FRAMES:    14,     // total frames of stutter window (~230ms at 60fps)
-    BG_STUTTER_CHANCE:    0.45,   // per-frame probability of flipping visibility during stutter
-    BG_STUTTER_DWELL_MS:  1500,   // minimum ms between stutter events
-    KICK_SUB_THRESH:      0.50,   // bands.sub threshold for kick detection
-    KICK_BASS_THRESH:     0.40,   // bands.bass threshold for kick detection
-    SNARE_HIGHMID_THRESH: 0.35,   // bands.highMid threshold for snare detection
-    SNARE_BASS_MAX:       0.30,   // bands.bass must be BELOW this for snare (not a kick)
-  },
 };

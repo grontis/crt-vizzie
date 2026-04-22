@@ -15,7 +15,6 @@ window.toggleScanlines = null;
 window.toggleDemo = null;
 window.toggleUI = null;
 window.toggleFullscreen = null;
-window.toggleVJSync = null;
 
 // ── p5 Sketch ──
 const sketch = function(p) {
@@ -28,7 +27,6 @@ const sketch = function(p) {
   let audioManager;
   let backgroundLayer;
   let backgroundFX;
-  let vjSync;
   let fusionAutomation;
 
   const modes = [];
@@ -98,7 +96,7 @@ const sketch = function(p) {
   }
 
   function renderGrid() {
-    const isGlitch  = window._glitchActive && currentModeIndex === 5;
+    const isGlitch  = window._glitchActive && currentModeIndex === 0;
     const cgaColors = CONFIG.CGA_COLORS;
 
     // Audio state for reactive rendering — zero when idle
@@ -349,7 +347,7 @@ const sketch = function(p) {
       bpmEl.textContent  = 'BPM: ---';
     }
 
-    const modeNames = ['MATRIX', 'SPECTRUM', 'WAVEFORM', 'VU METER', 'MORPH', 'GLITCH', 'TUNNEL', 'LIFE', 'LISSAJOUS', 'FUSION'];
+    const modeNames = ['GLITCH', 'FUSION'];
     modeEl.textContent = 'MODE: ' + (isIdle ? 'IDLE' : (modeNames[currentModeIndex] || 'UNKNOWN'));
 
     phoEl.textContent = 'PHO: ' + currentPhosphor.toUpperCase();
@@ -362,27 +360,31 @@ const sketch = function(p) {
     const demoBtn = document.getElementById('demo-btn');
     if (demoBtn) demoBtn.classList.toggle('active', src === 'demo');
 
-    // VJ Sync button lit = VJ sync active
-    const vjBtn = document.getElementById('vj-sync-btn');
-    if (vjBtn) vjBtn.classList.toggle('active', vjSync && vjSync.enabled);
-
-    // VJ Sync status indicator
-    const vjEl = document.getElementById('status-vj');
-    if (vjEl) vjEl.textContent = (vjSync && vjSync.enabled) ? '[VJ]' : '';
-
     // Fusion panel hint — shown only when Fusion mode is active and audio is running
     const fusionHintEl = document.getElementById('status-fusion');
-    if (fusionHintEl) fusionHintEl.style.display = (currentModeIndex === 9 && !isIdle) ? '' : 'none';
+    if (fusionHintEl) fusionHintEl.style.display = (currentModeIndex === 1 && !isIdle) ? '' : 'none';
 
     // Snapshot slot indicator — shown only in Fusion mode with audio active
     const snapEl = document.getElementById('status-snap');
     if (snapEl) {
-      if (currentModeIndex === 9 && fusionAutomation && !isIdle) {
+      if (currentModeIndex === 1 && fusionAutomation && !isIdle) {
         snapEl.textContent = '[SNAP: ' + (fusionAutomation.currentSlot + 1) + ']';
         snapEl.style.display = '';
       } else {
         snapEl.textContent = '';
         snapEl.style.display = 'none';
+      }
+    }
+
+    // BG playlist indicator — shown when playlist has 2+ items
+    const bgEl = document.getElementById('status-bg');
+    if (bgEl) {
+      if (backgroundLayer.playlistLength > 1) {
+        bgEl.textContent = '[BG ' + (backgroundLayer.playlistIndex + 1) + '/' + backgroundLayer.playlistLength + ']';
+        bgEl.style.display = '';
+      } else {
+        bgEl.textContent = '';
+        bgEl.style.display = 'none';
       }
     }
 
@@ -410,7 +412,7 @@ const sketch = function(p) {
     activeMode = modes[index];
     if (activeMode && typeof activeMode.reset === 'function') activeMode.reset();
     if (fusionAutomation) fusionAutomation.reset();
-    if (index !== 5) window._glitchActive = false;
+    if (index !== 0) window._glitchActive = false;
     updateModeButtons();
   }
 
@@ -454,6 +456,24 @@ const sketch = function(p) {
       console.warn('[AudioBrowser] Could not fetch /audio/:', e.message);
     }
     audioFilesLoading = false;
+  }
+
+  // Fetch background_images/manifest.json and seed the playlist.
+  // Mirrors the fetchAudioFileList() pattern — non-blocking, silent on failure.
+  async function fetchBgManifest() {
+    try {
+      const res = await fetch('background_images/manifest.json');
+      if (!res.ok) return;
+      const files = await res.json();
+      if (!Array.isArray(files)) return;
+      files.forEach(name => {
+        if (typeof name === 'string' && name.trim()) {
+          backgroundLayer.addUrl('background_images/' + name.trim(), name.trim());
+        }
+      });
+    } catch (e) {
+      console.warn('[BgManifest] Could not load manifest:', e.message);
+    }
   }
 
   // Load a file from the /audio/ library by filename.
@@ -546,20 +566,12 @@ const sketch = function(p) {
     audioManager    = new AudioManager();   // starts in 'idle'
     backgroundLayer = new BackgroundLayer();
     backgroundFX    = new BackgroundFX(backgroundLayer);
-    backgroundLayer.loadUrl('/background_images/lminalpool.jpg');
     resetIdleAnimation();
-    fetchAudioFileList();  // non-blocking — populates audioFiles when ready
+    fetchAudioFileList();   // non-blocking — populates audioFiles when ready
+    fetchBgManifest();      // non-blocking — seeds bg playlist from manifest.json
 
-    modes.push(new MatrixMode(CONFIG));     // 0
-    modes.push(new SpectrumMode(CONFIG));   // 1
-    modes.push(new WaveformMode(CONFIG));   // 2
-    modes.push(new VUMode(CONFIG));         // 3
-    modes.push(new MorphMode(CONFIG));      // 4
-    modes.push(new GlitchMode(CONFIG));     // 5
-    modes.push(new TunnelMode(CONFIG));     // 6
-    modes.push(new LifeMode(CONFIG));       // 7
-    modes.push(new LissajousMode(CONFIG));  // 8
-    modes.push(new FusionMode(CONFIG));     // 9
+    modes.push(new GlitchMode(CONFIG));   // 0
+    modes.push(new FusionMode(CONFIG));   // 1
 
     activeMode = modes[0];
 
@@ -582,10 +594,13 @@ const sketch = function(p) {
     window.toggleBackground = function() { backgroundLayer.toggle(); };
 
     window.loadBackgroundFile = function(input) {
-      const file = input.files[0];
-      if (file) backgroundLayer.load(file);
+      const files = Array.from(input.files);
+      files.forEach(f => backgroundLayer.addFile(f));
       input.value = '';
     };
+
+    window.bgNext = function() { backgroundLayer.next(); };
+    window.bgPrev = function() { backgroundLayer.prev(); };
 
     window.handleAudioFileInput = function(input) {
       const file = input.files[0];
@@ -593,58 +608,9 @@ const sketch = function(p) {
       input.value = '';
     };
 
-    // Font loading — accepts a file input element or a raw File (from drag-and-drop)
-    let _fontBlobUrl = null;
-    window.loadFontFile = async function(fileOrInput) {
-      const file = (fileOrInput instanceof File) ? fileOrInput : fileOrInput.files[0];
-      if (fileOrInput.value !== undefined) fileOrInput.value = '';
-      if (!file) return;
-
-      const blobUrl = URL.createObjectURL(file);
-      const fontName = 'VizzieFont_' + Date.now();
-
-      try {
-        const fontFace = new FontFace(fontName, `url(${blobUrl})`);
-        await fontFace.load();
-        document.fonts.add(fontFace);
-
-        // Revoke previous font blob now that the new one is loaded
-        if (_fontBlobUrl) URL.revokeObjectURL(_fontBlobUrl);
-        _fontBlobUrl = blobUrl;
-
-        CONFIG.FONT_FACE = fontName;
-        initGrid();   // recompute cell dimensions for new font metrics
-        console.log('[Font] Loaded:', file.name);
-      } catch (err) {
-        console.warn('[Font] Failed to load:', file.name, err);
-        URL.revokeObjectURL(blobUrl);
-      }
-    };
-
     window.toggleScanlines = function() { showScanlines = !showScanlines; };
 
-    // ── VJ Sync ──
-    function _adjustBgOpacity(delta) {
-      backgroundLayer.adjustOpacity(delta);
-    }
-
-    function _getCurrentModeIndex() {
-      return currentModeIndex;
-    }
-
-    vjSync = new VJSyncManager(audioManager, {
-      activateMode:        activateMode,
-      cyclePhosphor:       window.cyclePhosphor,
-      toggleScanlines:     window.toggleScanlines,
-      toggleBackground:    () => backgroundLayer.toggle(),
-      getBgVisible:        () => backgroundLayer.isVisible,
-      adjustBgOpacity:     _adjustBgOpacity,
-      getCurrentModeIndex: _getCurrentModeIndex,
-    });
-
     fusionAutomation = window.fusionAutomation;
-
-    window.toggleVJSync = function() { vjSync.toggle(); updateStatusBar(); };
 
     window.toggleDemo = function() {
       if (audioManager.isDemo) {
@@ -687,15 +653,10 @@ const sketch = function(p) {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
       if (!file) return;
-      const ext = file.name.toLowerCase().split('.').pop();
-      const isFontExt = ['ttf', 'otf', 'woff', 'woff2'].includes(ext);
-      const isFontMime = file.type.startsWith('font/') || file.type === 'application/x-font-ttf';
       if (file.type.startsWith('audio/')) {
         _loadAudioFileFromObject(file);
-      } else if (isFontExt || isFontMime) {
-        window.loadFontFile(file);
       } else {
-        backgroundLayer.load(file);
+        backgroundLayer.addFile(file);
       }
     });
 
@@ -723,13 +684,12 @@ const sketch = function(p) {
 
     // ── Active visualizer loop ──
     audioManager.update();
-    if (vjSync) vjSync.update(audioManager);
-    if (fusionAutomation && currentModeIndex === 9) {
+    if (fusionAutomation && currentModeIndex === 1) {
       fusionAutomation.update(audioManager);
     }
     backgroundLayer.update(cols, rows);
     if (backgroundFX) {
-      if (currentModeIndex === 9) backgroundFX.update(audioManager);
+      if (currentModeIndex === 1) backgroundFX.update(audioManager);
       else backgroundFX.hide();
     }
     activeMode.update(grid, cols, rows, audioManager, backgroundLayer);
@@ -769,37 +729,35 @@ const sketch = function(p) {
       case 'A': document.getElementById('audio-file-input').click(); break;
       case 'D': window.toggleDemo();       break;
       case 'P': window.cyclePhosphor();    break;
-      case 'T': document.getElementById('font-file-input').click(); break;
       case 'L': document.getElementById('bg-file-input').click(); break;
       case 'B': window.toggleBackground(); break;
       case 'S': window.toggleScanlines();  break;
       case 'F': window.toggleFullscreen(); break;
       case 'U': window.toggleUI();         break;
-      case 'V': if (window.toggleVJSync) window.toggleVJSync(); break;
       case '[': backgroundLayer.adjustOpacity(-CONFIG.BG_OPACITY_STEP); break;
       case ']': backgroundLayer.adjustOpacity( CONFIG.BG_OPACITY_STEP); break;
     }
 
     // Snapshot slot cycling — Fusion mode only, requires audio active
-    if (p.key === '.' && currentModeIndex === 9 && fusionAutomation && !audioManager.isIdle) {
+    if (p.key === '.' && currentModeIndex === 1 && fusionAutomation && !audioManager.isIdle) {
       fusionAutomation.nextSlot();
       updateStatusBar();
       return false;
     }
-    if (p.key === ',' && currentModeIndex === 9 && fusionAutomation && !audioManager.isIdle) {
+    if (p.key === ',' && currentModeIndex === 1 && fusionAutomation && !audioManager.isIdle) {
       fusionAutomation.prevSlot();
       updateStatusBar();
       return false;
     }
 
-    // Tab — open/close Fusion panel when Fusion is active; otherwise cycle modes
+    // Background playlist navigation — Shift+, (<) and Shift+. (>)
+    if (p.key === '<') { backgroundLayer.prev(); return false; }
+    if (p.key === '>') { backgroundLayer.next(); return false; }
+
+    // Tab — open/close Fusion params panel (Fusion mode only)
     if (keyCode === 9) {
-      if (!audioManager.isIdle) {
-        if (currentModeIndex === 9) {
-          if (window.toggleFusionPanel) window.toggleFusionPanel();
-        } else {
-          activateMode((currentModeIndex + 1) % modes.length);
-        }
+      if (!audioManager.isIdle && currentModeIndex === 1) {
+        if (window.toggleFusionPanel) window.toggleFusionPanel();
       }
       return false;
     }

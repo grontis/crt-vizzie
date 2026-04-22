@@ -300,30 +300,21 @@
   <!-- Button Bar -->
   <div id="button-bar">
     <div class="btn-group" id="mode-buttons">
-      <button class="ctrl-btn active" data-mode="0" onclick="switchModeByIndex(0)"><span class="btn-key">[1]</span>MATRIX</button>
-      <button class="ctrl-btn" data-mode="1" onclick="switchModeByIndex(1)"><span class="btn-key">[2]</span>SPECTRUM</button>
-      <button class="ctrl-btn" data-mode="2" onclick="switchModeByIndex(2)"><span class="btn-key">[3]</span>WAVEFORM</button>
-      <button class="ctrl-btn" data-mode="3" onclick="switchModeByIndex(3)"><span class="btn-key">[4]</span>VU METER</button>
-      <button class="ctrl-btn" data-mode="4" onclick="switchModeByIndex(4)"><span class="btn-key">[5]</span>MORPH</button>
-      <button class="ctrl-btn" data-mode="5" onclick="switchModeByIndex(5)"><span class="btn-key">[6]</span>GLITCH</button>
-      <button class="ctrl-btn" data-mode="6" onclick="switchModeByIndex(6)"><span class="btn-key">[7]</span>TUNNEL</button>
-      <button class="ctrl-btn" data-mode="7" onclick="switchModeByIndex(7)"><span class="btn-key">[8]</span>LIFE</button>
-      <button class="ctrl-btn" data-mode="8" onclick="switchModeByIndex(8)"><span class="btn-key">[9]</span>LISSAJOUS</button>
-      <button class="ctrl-btn" data-mode="9" onclick="switchModeByIndex(9)"><span class="btn-key">[0]</span>FUSION</button>
+      <button class="ctrl-btn active" data-mode="0" onclick="switchModeByIndex(0)"><span class="btn-key">[1]</span>GLITCH</button>
+      <button class="ctrl-btn" data-mode="1" onclick="switchModeByIndex(1)"><span class="btn-key">[2]</span>FUSION</button>
     </div>
     <div class="btn-sep"></div>
     <div class="btn-group">
       <button class="ctrl-btn" onclick="cyclePhosphor()"><span class="btn-key">[P]</span>PHOSPHOR</button>
       <button class="ctrl-btn" onclick="document.getElementById('audio-file-input').click()"><span class="btn-key">[A]</span>AUDIO FILE</button>
       <input type="file" id="audio-file-input" accept="audio/*" style="display:none" onchange="handleAudioFileInput(this)">
-      <button class="ctrl-btn" onclick="document.getElementById('font-file-input').click()"><span class="btn-key">[T]</span>FONT</button>
-      <input type="file" id="font-file-input" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="loadFontFile(this)">
       <button class="ctrl-btn" id="load-bg-btn" onclick="document.getElementById('bg-file-input').click()"><span class="btn-key">[L]</span>LOAD BG</button>
-      <input type="file" id="bg-file-input" accept="image/*,video/*" style="display:none" onchange="loadBackgroundFile(this)">
+      <input type="file" id="bg-file-input" accept="image/*,video/*" multiple style="display:none" onchange="loadBackgroundFile(this)">
       <button class="ctrl-btn" onclick="toggleBackground()"><span class="btn-key">[B]</span>BKGND</button>
+      <button class="ctrl-btn" onclick="bgPrev()"><span class="btn-key">[&lt;]</span>BG PREV</button>
+      <button class="ctrl-btn" onclick="bgNext()"><span class="btn-key">[&gt;]</span>BG NEXT</button>
       <button class="ctrl-btn" onclick="toggleScanlines()"><span class="btn-key">[S]</span>SCANLINES</button>
       <button class="ctrl-btn" id="demo-btn" onclick="toggleDemo()"><span class="btn-key">[D]</span>DEMO MODE</button>
-      <button class="ctrl-btn" id="vj-sync-btn" onclick="toggleVJSync()"><span class="btn-key">[V]</span>VJ SYNC</button>
       <button class="ctrl-btn" onclick="toggleUI()"><span class="btn-key">[U]</span>UI</button>
       <button class="ctrl-btn" onclick="toggleFullscreen()"><span class="btn-key">[F]</span>FULLSCREEN</button>
     </div>
@@ -336,9 +327,9 @@
     <span class="status-item" id="status-mode">MODE: BOOT</span>
     <span class="status-item" id="status-pho">PHO: GREEN</span>
     <span class="status-item" id="status-src">[READY]</span>
-    <span class="status-item" id="status-vj" style="color:var(--phosphor-bright);font-weight:bold;"></span>
     <span class="status-item" id="status-fusion" style="display:none;color:var(--phosphor-dim);">[TAB] PARAMS</span>
     <span class="status-item" id="status-snap" style="display:none;color:var(--phosphor-bright);font-weight:bold;"></span>
+    <span class="status-item" id="status-bg" style="display:none;color:var(--phosphor-bright);font-weight:bold;"></span>
     <span class="status-item" id="status-cursor">█</span>
   </div>
 
@@ -351,19 +342,10 @@
   <script src="ascii-art.js"></script>
   <script src="fusion-params.js"></script>
   <script src="background-fx.js"></script>
-  <script src="modes/matrix.js"></script>
-  <script src="modes/spectrum.js"></script>
-  <script src="modes/waveform.js"></script>
-  <script src="modes/vu.js"></script>
-  <script src="modes/morph.js"></script>
   <script src="modes/glitch.js"></script>
-  <script src="modes/tunnel.js"></script>
-  <script src="modes/life.js"></script>
-  <script src="modes/lissajous.js"></script>
   <script src="modes/fusion.js"></script>
   <script src="fusion-panel.js"></script>
   <script src="fusion-automation.js"></script>
-  <script src="vj-sync.js"></script>
   <script src="sketch.js"></script><!-- always last -->
 
 </body>
