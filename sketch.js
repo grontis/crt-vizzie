@@ -83,9 +83,6 @@ const sketch = function(p) {
       Array.from({ length: cols }, () => ({ char: ' ', brightness: 0 }))
     );
     if (activeMode && typeof activeMode.reset === 'function') activeMode.reset();
-    window._glitchActive          = false;
-    window._glitchColorGrid       = null;
-    window._glitchSizeGrid        = null;
     window._fusionGlitchActive    = false;
     window._fusionGlitchColorGrid = null;
     window._fusionGlitchSizeGrid  = null;
@@ -99,8 +96,7 @@ const sketch = function(p) {
   }
 
   function renderGrid() {
-    const isGlitch       = window._glitchActive       && currentModeIndex === 0;
-    const isFusionGlitch = window._fusionGlitchActive && currentModeIndex === 1;
+    const isFusionGlitch = window._fusionGlitchActive && currentModeIndex === 0;
     const cgaColors      = CONFIG.CGA_COLORS;
 
     // Audio state for reactive rendering — zero when idle
@@ -135,7 +131,6 @@ const sketch = function(p) {
           jy = (Math.random() - 0.5) *     jMag;
         }
 
-        // Determine per-cell whether to use Fusion CGA (glitch cells only when CGA is enabled)
         let useFusionCGA   = false;
         let fusionColorIdx = -1;
         if (isFusionGlitch && window._fusionGlitchColorGrid && window._fusionGlitchColorGrid[r]) {
@@ -143,32 +138,7 @@ const sketch = function(p) {
           useFusionCGA   = fusionColorIdx >= 0;
         }
 
-        if (isGlitch && window._glitchColorGrid && window._glitchColorGrid[r]) {
-          // GlitchMode (mode 0): CGA color — full grid, no sentinel needed
-          p.fill(cgaColors[(window._glitchColorGrid[r][c] || 0) % cgaColors.length]);
-
-          const sGrid    = window._glitchSizeGrid;
-          const sizeMult = (sGrid && sGrid[r]) ? (sGrid[r][c] || 1.0) : 1.0;
-
-          if (sizeMult > 1.02) {
-            // Draw oversized — shift up+left so the char grows out from cell center
-            const fs = Math.round(CONFIG.FONT_SIZE * sizeMult);
-            const ox = -(sizeMult - 1) * cellW * 0.5;
-            const oy = -(sizeMult - 1) * cellH * 0.5;
-            p.textSize(fs);
-            p.text(cell.char, px + ox + jx,     py + oy + jy);
-            p.text(cell.char, px + ox + 1 + jx, py + oy + jy);
-            p.text(cell.char, px + ox + jx,     py + oy + 1 + jy);
-            p.text(cell.char, px + ox + 1 + jx, py + oy + 1 + jy);
-            p.textSize(CONFIG.FONT_SIZE);
-          } else {
-            // Standard 2×2 pixel bold
-            p.text(cell.char, px + jx,     py + jy);
-            p.text(cell.char, px + jx + 1, py + jy);
-            p.text(cell.char, px + jx,     py + jy + 1);
-            p.text(cell.char, px + jx + 1, py + jy + 1);
-          }
-        } else if (useFusionCGA) {
+        if (useFusionCGA) {
           // FusionMode glitch cell: CGA color + size grid
           p.fill(cgaColors[fusionColorIdx % cgaColors.length]);
 
@@ -212,7 +182,6 @@ const sketch = function(p) {
         }
       }
     }
-    window._glitchActive       = false;
     window._fusionGlitchActive = false;
   }
 
@@ -384,7 +353,7 @@ const sketch = function(p) {
       bpmEl.textContent  = 'BPM: ---';
     }
 
-    const modeNames = ['GLITCH', 'FUSION'];
+    const modeNames = ['FUSION'];
     modeEl.textContent = 'MODE: ' + (isIdle ? 'IDLE' : (modeNames[currentModeIndex] || 'UNKNOWN'));
 
     phoEl.textContent = 'PHO: ' + currentPhosphor.toUpperCase();
@@ -399,12 +368,12 @@ const sketch = function(p) {
 
     // Fusion panel hint — shown only when Fusion mode is active and audio is running
     const fusionHintEl = document.getElementById('status-fusion');
-    if (fusionHintEl) fusionHintEl.style.display = (currentModeIndex === 1 && !isIdle) ? '' : 'none';
+    if (fusionHintEl) fusionHintEl.style.display = (currentModeIndex === 0 && !isIdle) ? '' : 'none';
 
     // Snapshot slot indicator — shown only in Fusion mode with audio active
     const snapEl = document.getElementById('status-snap');
     if (snapEl) {
-      if (currentModeIndex === 1 && fusionAutomation && !isIdle) {
+      if (currentModeIndex === 0 && fusionAutomation && !isIdle) {
         snapEl.textContent = '[SNAP: ' + (fusionAutomation.currentSlot + 1) + ']';
         snapEl.style.display = '';
       } else {
@@ -449,7 +418,6 @@ const sketch = function(p) {
     activeMode = modes[index];
     if (activeMode && typeof activeMode.reset === 'function') activeMode.reset();
     if (fusionAutomation) fusionAutomation.reset();
-    if (index !== 0) window._glitchActive = false;
     updateModeButtons();
   }
 
@@ -607,8 +575,7 @@ const sketch = function(p) {
     fetchAudioFileList();   // non-blocking — populates audioFiles when ready
     fetchBgManifest();      // non-blocking — seeds bg playlist from manifest.json
 
-    modes.push(new GlitchMode(CONFIG));   // 0
-    modes.push(new FusionMode(CONFIG));   // 1
+    modes.push(new FusionMode(CONFIG));   // 0
 
     activeMode = modes[0];
 
@@ -721,12 +688,12 @@ const sketch = function(p) {
 
     // ── Active visualizer loop ──
     audioManager.update();
-    if (fusionAutomation && currentModeIndex === 1) {
+    if (fusionAutomation && currentModeIndex === 0) {
       fusionAutomation.update(audioManager);
     }
     backgroundLayer.update(cols, rows);
     if (backgroundFX) {
-      if (currentModeIndex === 1) backgroundFX.update(audioManager);
+      if (currentModeIndex === 0) backgroundFX.update(audioManager);
       else backgroundFX.hide();
     }
     activeMode.update(grid, cols, rows, audioManager, backgroundLayer);
@@ -776,12 +743,12 @@ const sketch = function(p) {
     }
 
     // Snapshot slot cycling — Fusion mode only, requires audio active
-    if (p.key === '.' && currentModeIndex === 1 && fusionAutomation && !audioManager.isIdle) {
+    if (p.key === '.' && currentModeIndex === 0 && fusionAutomation && !audioManager.isIdle) {
       fusionAutomation.nextSlot();
       updateStatusBar();
       return false;
     }
-    if (p.key === ',' && currentModeIndex === 1 && fusionAutomation && !audioManager.isIdle) {
+    if (p.key === ',' && currentModeIndex === 0 && fusionAutomation && !audioManager.isIdle) {
       fusionAutomation.prevSlot();
       updateStatusBar();
       return false;
@@ -793,7 +760,7 @@ const sketch = function(p) {
 
     // Tab — open/close Fusion params panel (Fusion mode only)
     if (keyCode === 9) {
-      if (!audioManager.isIdle && currentModeIndex === 1) {
+      if (!audioManager.isIdle && currentModeIndex === 0) {
         if (window.toggleFusionPanel) window.toggleFusionPanel();
       }
       return false;

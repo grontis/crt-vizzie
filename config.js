@@ -34,14 +34,8 @@ const CONFIG = {
   SCANLINE_SPACING: 4,     // draw a line every N pixels
 
   // ── Modes ──
-  MORPH_WIDTH: 40,   // ASCII art stamp width — used by glitch.js and fusion.js
-  MORPH_HEIGHT: 20,  // ASCII art stamp height — used by glitch.js and fusion.js
-
-  GLITCH_DECAY_RATE: 0.010,  // brightness decay per frame in glitch buffer
-  GLITCH_SEED_INTERVAL: 80, // frames between buffer reseeds
-  GLITCH_SMEAR_CHANCE: 0.10,
-  GLITCH_TEAR_CHANCE: 0.030,
-  GLITCH_DROP_CHANCE: 0.025,
+  MORPH_WIDTH: 40,   // ASCII art stamp width
+  MORPH_HEIGHT: 20,  // ASCII art stamp height
 
   // ── Phosphor Presets ──
   PHOSPHORS: {
@@ -53,7 +47,7 @@ const CONFIG = {
   },
   PHOSPHOR_ORDER: ['green', 'amber', 'blue', 'red', 'white'],
 
-  // ── CGA Colors (used exclusively by glitch mode) ──
+  // ── CGA Colors (used by Fusion mode glitch layer) ──
   CGA_COLORS: [
     '#000000', '#0000aa', '#00aa00', '#00aaaa',
     '#aa0000', '#aa00aa', '#aa5500', '#aaaaaa',
