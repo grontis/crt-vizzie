@@ -398,6 +398,17 @@
       { label: 'LUMA',   key: 'bgLumaBoost',   min: 0,    max: 1.0,  step: 0.05  },
     ]));
 
+    // WAVE section
+    body.appendChild(_makeSection('WAVE', 'waveEnabled', [
+      { label: 'OPACITY', key: 'waveOpacity',    min: 0,    max: 1.0,  step: 0.01  },
+      { label: 'THRESH',  key: 'waveThreshold',  min: 0.3,  max: 0.85, step: 0.01  },
+      { label: 'SPEED',   key: 'waveSpeed',      min: 0.01, max: 0.12, step: 0.005 },
+      { label: 'B.BOOST', key: 'waveBeatBoost',  min: 0,    max: 0.5,  step: 0.01  },
+      { label: 'B.DECAY', key: 'waveBeatDecay',  min: 0.02, max: 0.2,  step: 0.005 },
+      { label: 'THRESH↓', key: 'waveThreshDrop', min: 0,    max: 0.4,  step: 0.01  },
+      { label: 'CHAR RT', key: 'waveCharRate',   min: 0,    max: 0.05, step: 0.001 },
+    ]));
+
     // BG FX section (pixel pipeline FX — nested FUSION_PARAMS.bgFx keys)
     const bgFxSection = _makeSection('BG FX', 'enabled', [
       { label: 'WARP',    key: 'warpAmount',    min: 0,   max: 20,  step: 1    },

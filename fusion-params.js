@@ -52,6 +52,9 @@ window.FUSION_PARAMS = {
   glitchTear:      0.020,  // per-row horizontal tear probability on beat
   glitchSeedInterval: 80,  // frames between timer-based content reseeds
   glitchCgaEnabled:   true, // use CGA 16-color palette on glitch cells; false = phosphor
+  glitchDecayRate:    0.010, // brightness lost per frame on glitch cells
+  glitchSmearChance:  0.10,  // per-cell chance per frame to smear char to right/down neighbor
+  glitchDropChance:   0.025, // per-cell chance per frame to drop (zero) brightness
 
   // ── Background layer ──────────────────────────────────────────────────────
   // default: BG_KICK_SUB = 0.50
@@ -72,6 +75,16 @@ window.FUSION_PARAMS = {
   bgStutterDwell:  1500,   // minimum ms between stutter events (internal, no slider)
   // default: BG_LUMA_BOOST = 0.35
   bgLumaBoost:     0.35,   // max extra brightness added to figure cells by luma sampling
+
+  // ── Wave layer ────────────────────────────────────────────────────────────
+  waveEnabled:    true,
+  waveOpacity:    0.75,    // global brightness multiplier (0–1)
+  waveThreshold:  0.60,    // field value above which chars are visible (0–1)
+  waveSpeed:      0.04,    // base time advancement per frame
+  waveBeatBoost:  0.18,    // speed added on beat rising edge (decays per frame)
+  waveBeatDecay:  0.06,    // speed boost decay rate per frame
+  waveThreshDrop: 0.18,    // amount threshold is lowered on beat
+  waveCharRate:   0.006,   // per-cell chance per frame to mutate visible char
 
   // ── Background pixel FX (BackgroundFX class) ─────────────────────────────
   bgFx: {
@@ -135,6 +148,9 @@ window.FUSION_PARAM_RANGES = {
   glitchScatter:   { min: 0,     max: 0.15  },
   glitchTear:      { min: 0,     max: 0.05  },
   glitchSeedInterval: { min: 20, max: 300 },
+  glitchDecayRate:   { min: 0.002, max: 0.05 },
+  glitchSmearChance: { min: 0,     max: 0.3  },
+  glitchDropChance:  { min: 0,     max: 0.1  },
 
   // Background modulation layer
   bgKickSub:       { min: 0.1,   max: 0.9   },
@@ -143,6 +159,15 @@ window.FUSION_PARAM_RANGES = {
   bgPulseDecay:    { min: 0.01,  max: 0.15  },
   bgTrebleThresh:  { min: 0.1,   max: 0.9   },
   bgLumaBoost:     { min: 0,     max: 1.0   },
+
+  // Wave layer
+  waveOpacity:     { min: 0,     max: 1.0  },
+  waveThreshold:   { min: 0.3,   max: 0.85 },
+  waveSpeed:       { min: 0.01,  max: 0.12 },
+  waveBeatBoost:   { min: 0,     max: 0.5  },
+  waveBeatDecay:   { min: 0.02,  max: 0.2  },
+  waveThreshDrop:  { min: 0,     max: 0.4  },
+  waveCharRate:    { min: 0,     max: 0.05 },
 
   // Background pixel FX (nested sub-object)
   bgFx: {

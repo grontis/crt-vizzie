@@ -1,13 +1,14 @@
-// modes/fusion.js — Fusion Mode: ASCII Art + Matrix Rain + Glitch Corruption + BG Modulation
+// modes/fusion.js — Fusion Mode: ASCII Art + Matrix Rain + Wave + Glitch Corruption + BG Modulation
 //
-// Four layered systems rendered into a single grid each frame:
+// Five layered systems rendered into a single grid each frame:
 //   FIGURE : A centered ASCII art figure that slowly decays and gets reseeded
+//   WAVE   : 2D plasma field of overlapping sine waves — katakana appear at field crests
 //   RAIN   : Matrix-style falling columns that burn through and interact with the figure
 //   GLITCH : Beat-triggered corruption — persistent buffer with pulse waves, smear, and decay
 //   BG     : Background image modulation mirroring VJ sync — kick-driven opacity pulse,
 //            treble-triggered stutter, and per-cell luma sampling to bias figure brightness
 //
-// Rendering order: figure (background) → rain (midground) → glitch buffer (top)
+// Rendering order: figure → wave → rain (midground) → glitch buffer (top)
 // All tunable constants live in window.FUSION_PARAMS (fusion-params.js).
 // Default values are shown as comments beside each static field declaration below.
 
@@ -69,6 +70,12 @@ class FusionMode {
     this._lastBgStutter   = 0;     // performance.now() of last stutter trigger
     this._prevTreble      = 0;     // treble value from last frame for rising-edge detection
     this._prevBeatActive  = false; // beat state from last frame for rising-edge detection
+
+    // Wave layer state
+    this._waveTime        = 0;
+    this._waveBeatBoost   = 0;
+    this._waveThreshBoost = 0;
+    this._waveChars       = [];
   }
 
   reset() {
@@ -95,6 +102,12 @@ class FusionMode {
     this._seedTimer       = 0;
     this._bgPulseActive   = 0;
     this._bgStutterFrames = 0;
+    this._waveTime        = 0;
+    this._waveBeatBoost   = 0;
+    this._waveThreshBoost = 0;
+    this._waveChars = Array.from({ length: rows }, () =>
+      Array.from({ length: cols }, () => this._katakana())
+    );
     this._stampFigure(cols, rows);
   }
 
@@ -334,6 +347,18 @@ class FusionMode {
       }
     }
 
+    // ── Phase 2b: Update wave state ────────────────────────────────────────
+
+    if (FUSION_PARAMS.waveEnabled) {
+      if (beatRisingEdge) {
+        this._waveBeatBoost   = Math.min(0.8, this._waveBeatBoost + FUSION_PARAMS.waveBeatBoost * beatIntensity);
+        this._waveThreshBoost = Math.min(0.5, this._waveThreshBoost + FUSION_PARAMS.waveThreshDrop * beatIntensity);
+      }
+      this._waveTime       += FUSION_PARAMS.waveSpeed + this._waveBeatBoost;
+      this._waveBeatBoost   = Math.max(0, this._waveBeatBoost   - FUSION_PARAMS.waveBeatDecay);
+      this._waveThreshBoost = Math.max(0, this._waveThreshBoost - FUSION_PARAMS.waveBeatDecay * 0.7);
+    }
+
     // ── Phase 3: Update glitch state ──────────────────────────────────────
     //
     // Full GlitchMode-style: timer-based seeding, continuous treble noise,
@@ -499,11 +524,11 @@ class FusionMode {
 
           // Brightness decay — breathes with beat phase
           cell.brightness = Math.max(0,
-            cell.brightness - CONFIG.GLITCH_DECAY_RATE * (0.4 + 0.6 * glitchEnergy) * phaseDecayMult
+            cell.brightness - FUSION_PARAMS.glitchDecayRate * (0.4 + 0.6 * glitchEnergy) * phaseDecayMult
           );
 
           // Horizontal smear — propagate colorIdx
-          if (Math.random() < CONFIG.GLITCH_SMEAR_CHANCE * bassWeight && c + 1 < cols) {
+          if (Math.random() < FUSION_PARAMS.glitchSmearChance * bassWeight && c + 1 < cols) {
             this._glitchBuffer[r][c + 1] = {
               char:       cell.char,
               colorIdx:   cell.colorIdx,
@@ -512,7 +537,7 @@ class FusionMode {
           }
 
           // Downward smear — shift colorIdx by 1
-          if (Math.random() < CONFIG.GLITCH_SMEAR_CHANCE * 0.5 * airEnergy && r + 1 < rows) {
+          if (Math.random() < FUSION_PARAMS.glitchSmearChance * 0.5 * airEnergy && r + 1 < rows) {
             this._glitchBuffer[r + 1][c] = {
               char:       cell.char,
               colorIdx:   (cell.colorIdx + 1) % 16,
@@ -542,7 +567,7 @@ class FusionMode {
           }
 
           // Dropout
-          if (Math.random() < CONFIG.GLITCH_DROP_CHANCE * bassWeight) {
+          if (Math.random() < FUSION_PARAMS.glitchDropChance * bassWeight) {
             cell.brightness = 0;
           }
         }
@@ -566,9 +591,9 @@ class FusionMode {
       window._fusionGlitchActive = false;
     }
 
-    // ── Phase 4: Render — figure → rain → glitch ──────────────────────────
+    // ── Phase 4: Render — figure → wave → rain → glitch ──────────────────
 
-    // 4a. Figure (background) — written first so rain/glitch can overwrite.
+    // 4a. Figure (background) — written first so wave/rain/glitch can overwrite.
     //     Where a background image is loaded, luma at each cell biases brightness
     //     so bright image areas make the figure chars glow more.
     if (FUSION_PARAMS.figureEnabled) {
@@ -584,7 +609,47 @@ class FusionMode {
       }
     }
 
-    // 4b. Rain (midground) — overwrites figure cells it passes through
+    // 4b. Wave — phosphor-colored katakana field from overlapping sine waves
+    if (FUSION_PARAMS.waveEnabled) {
+      const t         = this._waveTime;
+      const threshold = Math.max(0.1, FUSION_PARAMS.waveThreshold - this._waveThreshBoost);
+      const op        = FUSION_PARAMS.waveOpacity;
+      const bassE     = bands.bass;
+      const trebleE   = bands.treble;
+      const midE      = bands.mid;
+      const TWO_PI    = Math.PI * 2;
+
+      // Radial center roams slowly around grid center
+      const cx = cols * 0.5 + Math.sin(t * 0.011) * cols * 0.3;
+      const cy = rows * 0.5 + Math.cos(t * 0.007) * rows * 0.3;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cn   = c / cols * TWO_PI;
+          const rn   = r / rows * TWO_PI;
+          const dx   = (c - cx) / cols * TWO_PI;
+          const dy   = (r - cy) / rows * TWO_PI;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          const field =
+            Math.sin(cn * 2.0 + t * 0.7)                          * 0.22 +
+            Math.sin(cn * 1.5 + rn * 1.0 + t * 0.5)              * 0.20 +
+            Math.sin(rn * 2.5 - t * 0.4 + bassE * Math.PI)        * 0.22 +
+            Math.sin(dist * 2.0 - t * 1.1 + trebleE * Math.PI)    * 0.18 +
+            Math.sin(cn * 1.2 - rn * 1.8 + t * 0.6 + midE * 0.5) * 0.18;
+
+          const norm = (field + 1) * 0.5;
+          if (norm > threshold) {
+            if (Math.random() < FUSION_PARAMS.waveCharRate) {
+              this._waveChars[r][c] = this._katakana();
+            }
+            setCell(c, r, this._waveChars[r][c], (norm - threshold) / (1 - threshold) * op);
+          }
+        }
+      }
+    }
+
+    // 4c. Rain (midground) — overwrites figure cells it passes through
     if (FUSION_PARAMS.rainEnabled) {
       const rainOp = FUSION_PARAMS.rainOpacity;
       for (let c = 0; c < cols; c++) {
@@ -613,7 +678,7 @@ class FusionMode {
       }
     }
 
-    // 4c. Glitch buffer (top layer) — CGA-colored via sparse side-channel
+    // 4d. Glitch buffer (top layer) — CGA-colored via sparse side-channel
     if (FUSION_PARAMS.glitchEnabled) {
       const useCGA = FUSION_PARAMS.glitchCgaEnabled;
 
