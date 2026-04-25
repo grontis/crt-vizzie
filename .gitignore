@@ -2,3 +2,11 @@
 .claude/
 .vscode/
 
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Abandoned Tauri experiment
+src-tauri/
+

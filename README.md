@@ -129,6 +129,26 @@ npm install electron
 
 For most Pi installs Chromium kiosk is simpler and works fine.
 
+### Hardware controls (MCP3008 knobs/sliders)
+
+The `pi/` directory contains a companion Python bridge that reads physical knobs and sliders via an MCP3008 ADC over SPI and pushes their values into the visualizer's `FUSION_PARAMS` in real time. It also receives audio-reactive data (beat, intensity, frequency bands) from the browser to drive LEDs attached to the Pi's GPIO.
+
+**Hardware**: MCP3008 ADC on SPI0 CE0, up to 8 potentiometers or sliders. `pi/hw-mapping.json` maps each channel to a `FUSION_PARAMS` key with a physical min/max range.
+
+**Start everything with one command:**
+
+```bash
+pip install websockets          # one-time, Pi only
+chmod +x pi/pi-start.sh
+./pi/pi-start.sh                # starts HTTP server on :8080 + WebSocket bridge on :9001
+```
+
+Then open `http://localhost:8080` in Chromium. The bridge connects automatically.
+
+**Dev machine (no hardware):** run `python pi/pi-bridge.py` — `spidev` is unavailable, so it automatically falls back to slowly-changing sine wave values on all channels. Useful for testing the parameter pipeline without physical hardware.
+
+**LED output:** fill in `pi/led_output.py` → `update_leds(beat_active, beat_intensity, bands)` with your `rpi_ws281x` / `RPi.GPIO` code. The bridge calls it on every audio frame received from the browser (~16 Hz). No other files need to change.
+
 ---
 
 ## CRT output
@@ -144,23 +164,29 @@ For most Pi installs Chromium kiosk is simpler and works fine.
 
 ```
 crt-vizzie/
-├── index.html        — entry point and UI chrome
-├── config.js         — all tunable constants
-├── audio.js          — AudioManager (file / mic / system / demo sources)
-├── background.js     — BackgroundLayer (video/image bleed-through)
-├── ascii-art.js      — ASCII figure library for morph mode
-├── sketch.js         — p5.js core, grid, render loop, keyboard handling
-├── fonts/            — place VT323-Regular.woff2 here for offline use
-└── modes/
-    ├── matrix.js
-    ├── spectrum.js
-    ├── waveform.js
-    ├── vu.js
-    ├── morph.js
-    ├── glitch.js
-    ├── tunnel.js
-    ├── life.js
-    └── lissajous.js
+├── index.html           — entry point and UI chrome
+├── config.js            — all tunable constants
+├── audio.js             — AudioManager (file / mic / system / demo sources)
+├── background.js        — BackgroundLayer (video/image bleed-through)
+├── ascii-art.js         — ASCII figure library for morph mode
+├── hardware-bridge.js   — browser WebSocket client; receives hardware params, sends audio state
+├── sketch.js            — p5.js core, grid, render loop, keyboard handling
+├── fonts/               — place VT323-Regular.woff2 here for offline use
+├── modes/
+│   ├── matrix.js
+│   ├── spectrum.js
+│   ├── waveform.js
+│   ├── vu.js
+│   ├── morph.js
+│   ├── glitch.js
+│   ├── tunnel.js
+│   ├── life.js
+│   └── lissajous.js
+└── pi/                  — Raspberry Pi hardware companion (runs alongside the browser app)
+    ├── pi-bridge.py     — asyncio WebSocket server; reads MCP3008 ADC, drives LED output
+    ├── led_output.py    — LED/GPIO stub; fill in rpi_ws281x calls here
+    ├── hw-mapping.json  — maps MCP3008 channels to FUSION_PARAMS keys
+    └── pi-start.sh      — one-command launcher (HTTP server + bridge)
 ```
 
 To add a new visual mode: create `modes/yourmode.js` with an `update(grid, cols, rows, audio, bg)` method, add a `<script>` tag in `index.html`, and instantiate it in `sketch.js`.
