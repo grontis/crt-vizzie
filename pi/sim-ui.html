@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>crt-vizzie Pi Simulator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #111;
+    color: #33ff66;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 12px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #1a4d26;
+    margin-bottom: 12px;
+  }
+
+  header h1 {
+    font-size: 15px;
+    font-weight: normal;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #66ffaa;
+  }
+
+  #status-indicator {
+    font-size: 14px;
+    margin-left: auto;
+  }
+
+  #status-indicator.connected { color: #33ff66; }
+  #status-indicator.disconnected { color: #555; }
+
+  /* Two-column chip layout */
+  .chips {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .chip-panel {
+    border: 1px solid #1a4d26;
+    padding: 10px;
+  }
+
+  .chip-label {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #66ffaa;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #1a4d26;
+    padding-bottom: 4px;
+  }
+
+  /* One row per channel */
+  .channel-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 56px;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+  }
+
+  .channel-row:not(:last-child) {
+    border-bottom: 1px solid #0d2e17;
+  }
+
+  .ch-label {
+    font-size: 11px;
+    color: #99ddaa;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ch-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: #1a4d26;
+    outline: none;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  .ch-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 14px;
+    background: #33ff66;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  .ch-slider::-moz-range-thumb {
+    width: 10px;
+    height: 14px;
+    background: #33ff66;
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  .ch-value {
+    font-size: 11px;
+    color: #ffcc44;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    min-width: 52px;
+  }
+
+  /* Audio readout */
+  #audio-panel {
+    border: 1px solid #1a4d26;
+    padding: 10px;
+  }
+
+  #audio-panel h2 {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #66ffaa;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #1a4d26;
+    padding-bottom: 4px;
+    font-weight: normal;
+  }
+
+  .audio-top {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+
+  #beat-indicator {
+    font-size: 18px;
+    line-height: 1;
+    color: #333;
+    transition: color 80ms;
+  }
+
+  #beat-indicator.active {
+    color: #33ff66;
+    text-shadow: 0 0 8px #33ff66;
+  }
+
+  #intensity-display {
+    font-size: 12px;
+    color: #99ddaa;
+  }
+
+  #intensity-display span {
+    color: #ffcc44;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .band-bars {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+  }
+
+  .band-bar-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .band-name {
+    font-size: 10px;
+    color: #557766;
+    text-align: center;
+    text-transform: uppercase;
+  }
+
+  .band-track {
+    height: 8px;
+    background: #0d2e17;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .band-fill {
+    height: 100%;
+    background: #33ff66;
+    width: 0%;
+    transition: width 80ms linear;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>crt-vizzie Pi Simulator</h1>
+  <div id="status-indicator" class="disconnected">&#9675; Disconnected</div>
+</header>
+
+<div class="chips">
+  <div class="chip-panel" id="chip0">
+    <div class="chip-label">Chip 0</div>
+  </div>
+  <div class="chip-panel" id="chip1">
+    <div class="chip-label">Chip 1</div>
+  </div>
+</div>
+
+<div id="audio-panel">
+  <h2>Audio Readout</h2>
+  <div class="audio-top">
+    <div id="beat-indicator">&#9632;</div>
+    <div id="intensity-display">intensity: <span id="intensity-val">0.00</span></div>
+  </div>
+  <div class="band-bars">
+    <div class="band-bar-wrap">
+      <div class="band-name">sub</div>
+      <div class="band-track"><div class="band-fill" id="band-sub"></div></div>
+    </div>
+    <div class="band-bar-wrap">
+      <div class="band-name">bass</div>
+      <div class="band-track"><div class="band-fill" id="band-bass"></div></div>
+    </div>
+    <div class="band-bar-wrap">
+      <div class="band-name">lowMid</div>
+      <div class="band-track"><div class="band-fill" id="band-lowMid"></div></div>
+    </div>
+    <div class="band-bar-wrap">
+      <div class="band-name">mid</div>
+      <div class="band-track"><div class="band-fill" id="band-mid"></div></div>
+    </div>
+    <div class="band-bar-wrap">
+      <div class="band-name">highMid</div>
+      <div class="band-track"><div class="band-fill" id="band-highMid"></div></div>
+    </div>
+    <div class="band-bar-wrap">
+      <div class="band-name">treble</div>
+      <div class="band-track"><div class="band-fill" id="band-treble"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Source: pi/hw-mapping.json — update both files if mapping changes
+const CHANNELS = [
+  { "chip": 0, "channel": 0, "param": "rainSpeedMax",     "label": "Rain Speed Max",     "min": 0.3,   "max": 2.0   },
+  { "chip": 0, "channel": 1, "param": "glitchChance",     "label": "Glitch Chance",      "min": 0.05,  "max": 1.0   },
+  { "chip": 0, "channel": 2, "param": "figBrightness",    "label": "Figure Brightness",  "min": 0.1,   "max": 1.0   },
+  { "chip": 0, "channel": 3, "param": "figDecay",         "label": "Figure Decay",       "min": 0.001, "max": 0.03  },
+  { "chip": 0, "channel": 4, "param": "rainBeatMult",     "label": "Rain Beat Mult",     "min": 1.0,   "max": 6.0   },
+  { "chip": 0, "channel": 5, "param": "bgFx.warpAmount",  "label": "BG Warp Amount",     "min": 0.0,   "max": 20.0  },
+  { "chip": 0, "channel": 6, "param": "bgFx.chromaOffset","label": "BG Chroma Offset",   "min": 0.0,   "max": 12.0  },
+  { "chip": 0, "channel": 7, "param": "waveOpacity",      "label": "Wave Opacity",       "min": 0.0,   "max": 1.0   },
+
+  { "chip": 1, "channel": 0, "param": "rainSpeedMin",     "label": "Rain Speed Min",     "min": 0.05,  "max": 0.5   },
+  { "chip": 1, "channel": 1, "param": "rainTrail",        "label": "Rain Trail Length",  "min": 4,     "max": 30    },
+  { "chip": 1, "channel": 2, "param": "glitchScatter",    "label": "Glitch Scatter",     "min": 0.0,   "max": 0.15  },
+  { "chip": 1, "channel": 3, "param": "glitchThreshold",  "label": "Glitch Threshold",   "min": 0.3,   "max": 0.95  },
+  { "chip": 1, "channel": 4, "param": "waveSpeed",        "label": "Wave Speed",         "min": 0.01,  "max": 0.12  },
+  { "chip": 1, "channel": 5, "param": "waveBeatBoost",    "label": "Wave Beat Boost",    "min": 0.0,   "max": 0.5   },
+  { "chip": 1, "channel": 6, "param": "bgPulseAmount",    "label": "BG Pulse Amount",    "min": 0.0,   "max": 0.5   },
+  { "chip": 1, "channel": 7, "param": "bgFx.warpFreq",    "label": "BG Warp Frequency",  "min": 0.003, "max": 0.05  }
+];
+
+// ── Build slider rows ──────────────────────────────────────────────────────────
+const chip0Panel = document.getElementById('chip0');
+const chip1Panel = document.getElementById('chip1');
+
+CHANNELS.forEach(function(entry) {
+  const panel = entry.chip === 0 ? chip0Panel : chip1Panel;
+
+  // Initialize to midpoint of range
+  entry._value = entry.min + (entry.max - entry.min) * 0.5;
+
+  const row = document.createElement('div');
+  row.className = 'channel-row';
+
+  const labelEl = document.createElement('div');
+  labelEl.className = 'ch-label';
+  labelEl.textContent = entry.label;
+  labelEl.title = entry.param;
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.className = 'ch-slider';
+  slider.min = 0;
+  slider.max = 1000;
+  slider.value = 500; // midpoint
+
+  const valueEl = document.createElement('div');
+  valueEl.className = 'ch-value';
+  valueEl.textContent = entry._value.toFixed(3);
+
+  slider.addEventListener('input', function() {
+    const normalized = slider.value / 1000;
+    entry._value = entry.min + normalized * (entry.max - entry.min);
+    valueEl.textContent = entry._value.toFixed(3);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'sim-set',
+        param: entry.param,
+        value: entry._value
+      }));
+    }
+  });
+
+  row.appendChild(labelEl);
+  row.appendChild(slider);
+  row.appendChild(valueEl);
+  panel.appendChild(row);
+});
+
+// ── Audio readout ──────────────────────────────────────────────────────────────
+const beatIndicator = document.getElementById('beat-indicator');
+const intensityVal  = document.getElementById('intensity-val');
+const bandEls = {
+  sub:     document.getElementById('band-sub'),
+  bass:    document.getElementById('band-bass'),
+  lowMid:  document.getElementById('band-lowMid'),
+  mid:     document.getElementById('band-mid'),
+  highMid: document.getElementById('band-highMid'),
+  treble:  document.getElementById('band-treble'),
+};
+
+let beatFlashTimer = null;
+
+function updateAudioReadout(msg) {
+  const beat    = msg.beatActive === true;
+  const intens  = typeof msg.beatIntensity === 'number' ? msg.beatIntensity : 0;
+  const bands   = msg.bands || {};
+
+  // Beat indicator flash
+  if (beat) {
+    beatIndicator.classList.add('active');
+    if (beatFlashTimer) clearTimeout(beatFlashTimer);
+    beatFlashTimer = setTimeout(function() {
+      beatIndicator.classList.remove('active');
+    }, 120);
+  }
+
+  intensityVal.textContent = (intens * 100).toFixed(0) + '%';
+
+  Object.keys(bandEls).forEach(function(key) {
+    const val = typeof bands[key] === 'number' ? bands[key] : 0;
+    bandEls[key].style.width = Math.round(Math.min(Math.max(val, 0), 1) * 100) + '%';
+  });
+}
+
+// ── WebSocket lifecycle ────────────────────────────────────────────────────────
+const statusEl = document.getElementById('status-indicator');
+let ws = null;
+
+function setStatus(connected) {
+  if (connected) {
+    statusEl.textContent = '● Connected';
+    statusEl.className = 'connected';
+  } else {
+    statusEl.textContent = '○ Disconnected';
+    statusEl.className = 'disconnected';
+  }
+}
+
+function handleMessage(evt) {
+  var msg;
+  try { msg = JSON.parse(evt.data); } catch(e) { return; }
+  if (msg.type === 'audio') {
+    updateAudioReadout(msg);
+  }
+  // Ignore 'hw' messages — not relevant for the control page
+}
+
+function connect() {
+  ws = new WebSocket('ws://localhost:9001');
+  ws.onopen  = function() { setStatus(true); };
+  ws.onclose = function() { setStatus(false); setTimeout(connect, 2000); };
+  ws.onerror = function() { /* onclose always follows */ };
+  ws.onmessage = handleMessage;
+}
+
+connect();
+</script>
+</body>
+</html>

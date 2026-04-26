@@ -133,7 +133,7 @@ For most Pi installs Chromium kiosk is simpler and works fine.
 
 The `pi/` directory contains a companion Python bridge that reads physical knobs and sliders via an MCP3008 ADC over SPI and pushes their values into the visualizer's `FUSION_PARAMS` in real time. It also receives audio-reactive data (beat, intensity, frequency bands) from the browser to drive LEDs attached to the Pi's GPIO.
 
-**Hardware**: MCP3008 ADC on SPI0 CE0, up to 8 potentiometers or sliders. `pi/hw-mapping.json` maps each channel to a `FUSION_PARAMS` key with a physical min/max range.
+**Hardware**: 2× MCP3008 ADC (SPI0 CE0 + CE1), up to 16 potentiometers or sliders total. `pi/hw-mapping.json` maps each channel (chip + channel number) to a `FUSION_PARAMS` key with a physical min/max range. Full wiring instructions in `pi/HARDWARE_SETUP.md`.
 
 **Start everything with one command:**
 
@@ -145,7 +145,7 @@ chmod +x pi/pi-start.sh
 
 Then open `http://localhost:8080` in Chromium. The bridge connects automatically.
 
-**Dev machine (no hardware):** run `python pi/pi-bridge.py` — `spidev` is unavailable, so it automatically falls back to slowly-changing sine wave values on all channels. Useful for testing the parameter pipeline without physical hardware.
+**Dev machine (no hardware):** use the interactive simulator instead of pi-bridge.py — it gives you drag sliders for all 16 channels and a live audio/LED readout, no Pi required. See `pi/SIM.md` for setup.
 
 **LED output:** fill in `pi/led_output.py` → `update_leds(beat_active, beat_intensity, bands)` with your `rpi_ws281x` / `RPi.GPIO` code. The bridge calls it on every audio frame received from the browser (~16 Hz). No other files need to change.
 
@@ -184,9 +184,13 @@ crt-vizzie/
 │   └── lissajous.js
 └── pi/                  — Raspberry Pi hardware companion (runs alongside the browser app)
     ├── pi-bridge.py     — asyncio WebSocket server; reads MCP3008 ADC, drives LED output
+    ├── pi-sim.py        — desktop simulator; drag-slider UI replacing pi-bridge.py for dev
+    ├── sim-ui.html      — browser control page for the simulator (open from file://)
     ├── led_output.py    — LED/GPIO stub; fill in rpi_ws281x calls here
-    ├── hw-mapping.json  — maps MCP3008 channels to FUSION_PARAMS keys
-    └── pi-start.sh      — one-command launcher (HTTP server + bridge)
+    ├── hw-mapping.json  — maps MCP3008 channels (2 chips × 8) to FUSION_PARAMS keys
+    ├── pi-start.sh      — one-command launcher (HTTP server + bridge)
+    ├── HARDWARE_SETUP.md — wiring guide: MCP3008, pots, sliders, LEDs, resistors
+    └── SIM.md           — desktop simulator quickstart
 ```
 
 To add a new visual mode: create `modes/yourmode.js` with an `update(grid, cols, rows, audio, bg)` method, add a `<script>` tag in `index.html`, and instantiate it in `sketch.js`.

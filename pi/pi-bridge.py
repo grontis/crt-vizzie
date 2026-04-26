@@ -74,27 +74,31 @@ else:
 log.info('Loaded %d channel mappings from hw-mapping.json', len(MAPPING))
 
 # ── SPI init (hardware only) ──────────────────────────────────────────────────
-_spi = None
+# _spi[0] = CE0 (MCP3008 chip 1), _spi[1] = CE1 (MCP3008 chip 2)
+_spi: list = [None, None]
 if _SPI_AVAILABLE:
-    try:
-        _spi = spidev.SpiDev()
-        _spi.open(0, 0)           # bus 0, device CE0
-        _spi.max_speed_hz = 1_000_000
-        _spi.mode = 0
-        log.info('SPI opened on /dev/spidev0.0 at 1 MHz')
-    except Exception as e:
-        log.warning('SPI open failed (%s) — falling back to mock mode', e)
-        _spi = None
+    for _idx, _ce in enumerate([0, 1]):
+        try:
+            _dev = spidev.SpiDev()
+            _dev.open(0, _ce)
+            _dev.max_speed_hz = 1_000_000
+            _dev.mode = 0
+            _spi[_idx] = _dev
+            log.info('SPI opened on /dev/spidev0.%d at 1 MHz', _ce)
+        except Exception as _e:
+            log.warning('SPI open failed for CE%d (%s) — chip %d reads as 0.0', _ce, _e, _idx)
 
-def _read_mcp3008(channel: int) -> float:
+def _read_mcp3008(chip: int, channel: int) -> float:
     """
     Read one MCP3008 channel via spidev.
+    chip: 0 = CE0 (chip 1), 1 = CE1 (chip 2)
     Returns a float in 0.0–1.0.
     Standard 3-byte SPI transaction (single-ended, MCP3008 protocol).
     """
-    if _spi is None:
+    dev = _spi[chip] if chip < len(_spi) else None
+    if dev is None:
         return 0.0
-    rx = _spi.xfer2([0x01, (0x80 | (channel << 4)) & 0xFF, 0x00])
+    rx = dev.xfer2([0x01, (0x80 | (channel << 4)) & 0xFF, 0x00])
     raw = ((rx[1] & 0x03) << 8) | rx[2]  # 10-bit result (0–1023)
     return raw / 1023.0
 
@@ -118,7 +122,8 @@ def _spi_poll_thread(loop: asyncio.AbstractEventLoop) -> None:
     """
     global _mock_time
 
-    log.info('SPI poll thread started (mode: %s)', 'hardware' if (_spi is not None) else 'mock')
+    active = sum(1 for s in _spi if s is not None)
+    log.info('SPI poll thread started (%d/%d chips active)', active, len(_spi))
 
     while True:
         start = time.monotonic()
@@ -126,12 +131,13 @@ def _spi_poll_thread(loop: asyncio.AbstractEventLoop) -> None:
         updates: dict = {}
 
         for entry in MAPPING:
+            chip  = entry.get('chip', 0)
             ch    = entry['channel']
             param = entry['param']
 
-            if _spi is not None:
+            if _spi[chip] is not None:
                 # Hardware: real ADC read
-                normalized = _read_mcp3008(ch)
+                normalized = _read_mcp3008(chip, ch)
             else:
                 # Mock: slowly-changing sine wave per channel, unique phase per channel
                 phase = _mock_time + ch * (math.pi * 2 / max(len(MAPPING), 1))
@@ -143,7 +149,7 @@ def _spi_poll_thread(loop: asyncio.AbstractEventLoop) -> None:
             if abs(value - last) > DEAD_ZONE:
                 _last_sent[param] = value
                 updates[param] = value
-                log.debug('ch%d %s → %.4f', ch, param, value)
+                log.debug('chip%d ch%d %s → %.4f', chip, ch, param, value)
 
         if updates:
             asyncio.run_coroutine_threadsafe(_adc_queue.put(updates), loop)

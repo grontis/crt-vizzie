@@ -1,60 +1,21 @@
 {
   "channels": [
-    {
-      "channel": 0,
-      "param": "rainSpeedMax",
-      "label": "Rain Speed Max",
-      "min": 0.3,
-      "max": 2.0
-    },
-    {
-      "channel": 1,
-      "param": "glitchChance",
-      "label": "Glitch Chance",
-      "min": 0.05,
-      "max": 1.0
-    },
-    {
-      "channel": 2,
-      "param": "figBrightness",
-      "label": "Figure Brightness",
-      "min": 0.1,
-      "max": 1.0
-    },
-    {
-      "channel": 3,
-      "param": "figDecay",
-      "label": "Figure Decay",
-      "min": 0.001,
-      "max": 0.03
-    },
-    {
-      "channel": 4,
-      "param": "rainBeatMult",
-      "label": "Rain Beat Mult",
-      "min": 1.0,
-      "max": 6.0
-    },
-    {
-      "channel": 5,
-      "param": "bgFx.warpAmount",
-      "label": "BG Warp Amount",
-      "min": 0.0,
-      "max": 20.0
-    },
-    {
-      "channel": 6,
-      "param": "bgFx.chromaOffset",
-      "label": "BG Chroma Offset",
-      "min": 0.0,
-      "max": 12.0
-    },
-    {
-      "channel": 7,
-      "param": "waveOpacity",
-      "label": "Wave Opacity",
-      "min": 0.0,
-      "max": 1.0
-    }
+    { "chip": 0, "channel": 0, "param": "rainSpeedMax",    "label": "Rain Speed Max",    "min": 0.3,   "max": 2.0  },
+    { "chip": 0, "channel": 1, "param": "glitchChance",    "label": "Glitch Chance",     "min": 0.05,  "max": 1.0  },
+    { "chip": 0, "channel": 2, "param": "figBrightness",   "label": "Figure Brightness", "min": 0.1,   "max": 1.0  },
+    { "chip": 0, "channel": 3, "param": "figDecay",        "label": "Figure Decay",      "min": 0.001, "max": 0.03 },
+    { "chip": 0, "channel": 4, "param": "rainBeatMult",    "label": "Rain Beat Mult",    "min": 1.0,   "max": 6.0  },
+    { "chip": 0, "channel": 5, "param": "bgFx.warpAmount", "label": "BG Warp Amount",    "min": 0.0,   "max": 20.0 },
+    { "chip": 0, "channel": 6, "param": "bgFx.chromaOffset","label": "BG Chroma Offset", "min": 0.0,   "max": 12.0 },
+    { "chip": 0, "channel": 7, "param": "waveOpacity",     "label": "Wave Opacity",      "min": 0.0,   "max": 1.0  },
+
+    { "chip": 1, "channel": 0, "param": "rainSpeedMin",    "label": "Rain Speed Min",    "min": 0.05,  "max": 0.5  },
+    { "chip": 1, "channel": 1, "param": "rainTrail",       "label": "Rain Trail Length", "min": 4,     "max": 30   },
+    { "chip": 1, "channel": 2, "param": "glitchScatter",   "label": "Glitch Scatter",    "min": 0.0,   "max": 0.15 },
+    { "chip": 1, "channel": 3, "param": "glitchThreshold", "label": "Glitch Threshold",  "min": 0.3,   "max": 0.95 },
+    { "chip": 1, "channel": 4, "param": "waveSpeed",       "label": "Wave Speed",        "min": 0.01,  "max": 0.12 },
+    { "chip": 1, "channel": 5, "param": "waveBeatBoost",   "label": "Wave Beat Boost",   "min": 0.0,   "max": 0.5  },
+    { "chip": 1, "channel": 6, "param": "bgPulseAmount",   "label": "BG Pulse Amount",   "min": 0.0,   "max": 0.5  },
+    { "chip": 1, "channel": 7, "param": "bgFx.warpFreq",   "label": "BG Warp Frequency", "min": 0.003, "max": 0.05 }
   ]
 }
