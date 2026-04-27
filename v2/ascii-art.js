@@ -1,7 +1,11 @@
-// ascii-art.js — AsciiArtLibrary
-// Static ASCII art figures for morph mode.
-// All figures are 40 columns × 20 rows (CONFIG.MORPH_WIDTH × CONFIG.MORPH_HEIGHT).
+// v2/ascii-art.js — AsciiArtLibrary
+// Ported from root ascii-art.js — no changes to figure data.
+// All figures are 40 columns × 20 rows (V2_CONFIG.MORPH_WIDTH × V2_CONFIG.MORPH_HEIGHT).
 // Each figure: { name: string, frames: string[][] }
+//
+// Load order: before fusion.js
+
+'use strict';
 
 const AsciiArtLibrary = {
 
@@ -199,7 +203,6 @@ const AsciiArtLibrary = {
     return this.figures[Math.floor(Math.random() * this.figures.length)];
   },
 
-  // Returns a specific frame (loops if out of bounds)
   getFrame(figure, frameIndex) {
     return figure.frames[frameIndex % figure.frames.length];
   },

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GRONTIS.IO v2 — WebGL ASCII Visualizer</title>
+  <style>
+    @font-face {
+      font-family: 'GlassTTY VT220';
+      src: url('../fonts/Glass_TTY_VT220.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: block;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #v2-canvas {
+      display: block;
+      /* Canvas size is set in JS; CSS keeps it centered */
+      image-rendering: pixelated;
+    }
+
+    #v2-status {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0, 0, 0, 0.75);
+      color: #00ff41;
+      font-family: 'GlassTTY VT220', monospace;
+      font-size: 13px;
+      padding: 4px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      z-index: 100;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="v2-canvas"></canvas>
+  <div id="v2-status">[IDLE] Loading...</div>
+
+  <!-- Load order is critical — config first, sketch last -->
+  <script src="config.js"></script>
+  <script src="audio.js"></script>
+  <script src="ascii-art.js"></script>
+  <script src="renderer.js"></script>
+  <script src="fusion.js"></script>
+  <script src="hardware-bridge.js"></script>
+  <script src="sketch.js"></script>
+
+</body>
+</html>
