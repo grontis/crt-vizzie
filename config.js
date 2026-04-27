@@ -19,7 +19,7 @@ const CONFIG = {
   // cols and rows are derived from canvas size / cell dimensions
 
   // ── FFT / Audio ──
-  FFT_BINS: 1024,          // number of FFT bins (must be power of 2)
+  FFT_BINS: 512,           // number of FFT bins (must be power of 2)
   FFT_SMOOTHING: 0.65,     // p5.FFT smoothing factor (0–1) — lower = faster decay on silence
   BEAT_THRESHOLD: 1.4,     // beat detected when bass > average * this
   BEAT_HISTORY: 43,        // number of bass energy samples for rolling average (~1s at 60fps / 1.4)

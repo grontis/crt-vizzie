@@ -183,6 +183,13 @@ class BackgroundFX {
       amplitude += baseAmt * beatIntensity * beatMult;
     }
 
+    // Precompute per-row and per-column displacements — dx depends only on y,
+    // dy only on x, so this cuts trig calls from O(w*h) down to O(w+h).
+    const dxRow = new Float32Array(h);
+    const dyCol = new Float32Array(w);
+    for (let y = 0; y < h; y++) dxRow[y] = Math.sin(y * freq + time)       * amplitude;
+    for (let x = 0; x < w; x++) dyCol[x] = Math.cos(x * freq + time * 0.7) * amplitude;
+
     // Read from scratch (posterized, un-warped) and write warped result to ctx
     const srcData = scratchCtx.getImageData(0, 0, w, h);
     const src = srcData.data;
@@ -191,13 +198,10 @@ class BackgroundFX {
     const out = outData.data;
 
     for (let y = 0; y < h; y++) {
+      const dx = dxRow[y];
       for (let x = 0; x < w; x++) {
-        // Compute displacement
-        const dx = Math.sin(y * freq + time)       * amplitude;
-        const dy = Math.cos(x * freq + time * 0.7) * amplitude;
-
         const sx = Math.max(0, Math.min(w - 1, Math.round(x + dx)));
-        const sy = Math.max(0, Math.min(h - 1, Math.round(y + dy)));
+        const sy = Math.max(0, Math.min(h - 1, Math.round(y + dyCol[x])));
 
         const dstIdx = (y  * w + x)  * 4;
         const srcIdx = (sy * w + sx) * 4;

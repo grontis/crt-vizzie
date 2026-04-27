@@ -36,6 +36,7 @@ const sketch = function(p) {
   let phosphorIndex = 0;
   let showScanlines = true;
   let showUI = true;
+  let scanlinesBuffer = null;
 
   // Idle screen typewriter state
   let idlePhase         = 'boot';  // 'boot' | 'glitch' | 'typing' | 'gap' | 'done'
@@ -82,6 +83,16 @@ const sketch = function(p) {
     grid  = Array.from({ length: rows }, () =>
       Array.from({ length: cols }, () => ({ char: ' ', brightness: 0 }))
     );
+
+    // Pre-bake scanline overlay into an offscreen buffer — composited as a single drawImage each frame
+    if (scanlinesBuffer) scanlinesBuffer.remove();
+    scanlinesBuffer = p.createGraphics(p.width, p.height);
+    scanlinesBuffer.noStroke();
+    scanlinesBuffer.fill(0, Math.floor(CONFIG.SCANLINE_ALPHA * 255));
+    for (let sy = 0; sy < p.height; sy += CONFIG.SCANLINE_SPACING * 2) {
+      scanlinesBuffer.rect(0, sy, p.width, CONFIG.SCANLINE_SPACING);
+    }
+
     if (activeMode && typeof activeMode.reset === 'function') activeMode.reset();
     window._fusionGlitchActive    = false;
     window._fusionGlitchColorGrid = null;
@@ -111,8 +122,6 @@ const sketch = function(p) {
     );
     const jitterActive = isActive && (beatIntensity > 0.05 || trebleEnergy > 0.3);
 
-    p.textFont(CONFIG.FONT_FACE);
-    p.textSize(CONFIG.FONT_SIZE);
     p.noStroke();
     p.textAlign(p.LEFT, p.TOP);
 
@@ -186,11 +195,7 @@ const sketch = function(p) {
   }
 
   function drawScanlines() {
-    p.noStroke();
-    p.fill(0, Math.floor(CONFIG.SCANLINE_ALPHA * 255));
-    for (let y = 0; y < p.height; y += CONFIG.SCANLINE_SPACING * 2) {
-      p.rect(0, y, p.width, CONFIG.SCANLINE_SPACING);
-    }
+    if (scanlinesBuffer) p.image(scanlinesBuffer, 0, 0);
   }
 
   // ── Idle screen ───────────────────────────────────────────────────────────
@@ -560,7 +565,8 @@ const sketch = function(p) {
     const canvas = p.createCanvas(container.offsetWidth, container.offsetHeight);
     canvas.parent('canvas-container');
 
-    p.frameRate(60);
+    p.frameRate(30);
+    p.pixelDensity(1);
     p.textAlign(p.LEFT, p.TOP);
     p.noStroke();
 
