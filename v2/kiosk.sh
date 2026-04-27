@@ -29,7 +29,7 @@ HTTP_PID=$!
 sleep 1
 
 echo "[kiosk] Starting Chromium kiosk..."
-chromium-browser \
+chromium \
   --kiosk \
   --ozone-platform=wayland \
   --ignore-gpu-blocklist \
