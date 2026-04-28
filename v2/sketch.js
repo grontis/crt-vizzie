@@ -22,6 +22,8 @@
   let audioManager = null;
   let fusionMode   = null;
   let bgLayer      = null;
+  let bgFx         = null;
+  let bgFxPanel    = null;
 
   let _audioContextResumed = false;
   let _lastFrameTime       = 0;
@@ -112,6 +114,8 @@
     //    ready to resample immediately after the user makes a selection.
     bgLayer = new V2BackgroundLayer();
     await bgLayer.loadDefault();
+    bgFx = new BgFxManager();
+    bgFxPanel = new BgFxPanel();
 
     // 5. Startup screen — blocks here until user selects an audio source.
     //    The render loop has NOT started yet, so the WebGL canvas is invisible
@@ -208,6 +212,7 @@
         audioManager.beatIntensity * V2_PARAMS.chromaBeat * 0.15;
 
       bgLayer.tick();
+      bgFx.update(audio);
       fusionMode.update(audio, renderer.cols, renderer.rows, bgLayer);
       renderer.upload(fusionMode.charIdx, fusionMode.bright16, fusionMode.cgaIdx);
     }
@@ -233,11 +238,19 @@
     document.addEventListener('keydown', (e) => {
       resumeAudio();
 
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const visible = bgFxPanel.toggle();
+        if (visible) bgFxPanel.syncState();
+        return;
+      }
+
       switch (e.key.toUpperCase()) {
         case 'D':
           // Demo mode toggle
           if (audioManager.isDemo) {
             audioManager.stopAudio();
+            bgFx.reset();
           } else {
             audioManager.enableDemoMode();
             // Demo mode may need audio graph if ctx just resumed
@@ -263,6 +276,7 @@
           V2_PARAMS.bgEnabled = !V2_PARAMS.bgEnabled;
           const bgEl = document.getElementById('v2-bg-image');
           if (bgEl) bgEl.classList.toggle('visible', V2_PARAMS.bgEnabled);
+          if (!V2_PARAMS.bgEnabled) bgFx.reset();
           updateStatus();
           break;
         }
@@ -293,6 +307,13 @@
           if (document.fullscreenElement) {
             document.exitFullscreen().catch(() => {});
           }
+          break;
+
+        case 'X':
+          // Toggle audio-reactive CSS filter FX on background layer
+          V2_PARAMS.bgFxEnabled = !V2_PARAMS.bgFxEnabled;
+          if (!V2_PARAMS.bgFxEnabled) bgFx.reset();
+          updateStatus();
           break;
 
         case '`':
@@ -405,10 +426,11 @@
     if (!el) return;
     const src = audioManager ? audioManager.audioSource : 'idle';
     const ph  = audioManager ? V2_CONFIG.PHOSPHOR_ORDER[V2_PARAMS.phosphorIndex] : '–';
-    const glInfo = renderer ? renderer.glVersion : '–';
+    const glInfo   = renderer ? renderer.glVersion : '–';
     const scanName = V2_PARAMS.scanlineMode ? 'ON' : 'OFF';
     const bgState  = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
-    el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | ${glInfo} | B=bg S=scanline P=phosphor L=load-bg F=full`;
+    const bgFxState = V2_PARAMS.bgFxEnabled ? 'ON' : 'OFF';
+    el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | bgfx:${bgFxState} | ${glInfo} | B=bg X=bgfx S=scanline P=phosphor L=load-bg F=full`;
   }
 
   // ── Error display ─────────────────────────────────────────────────────────

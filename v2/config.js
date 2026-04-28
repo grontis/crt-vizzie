@@ -119,13 +119,13 @@ window.V2_PARAMS = {
   figOpacity:      1.0,
 
   // Rain layer
-  rainSpeedMin:  0.15,
-  rainSpeedMax:  0.90,
+  rainSpeedMin:  0.001,
+  rainSpeedMax:  0.1,
   rainBeatMult:  3.2,
-  rainTrail:     14,
+  rainTrail:     4,
   rainInteract:  0.50,
   rainBurnBoost: 0.20,
-  rainOpacity:   1.0,
+  rainOpacity:   0.5,
 
   // Wave layer
   waveOpacity:    0.75,
@@ -137,14 +137,14 @@ window.V2_PARAMS = {
   waveCharRate:   0.006,
 
   // Glitch layer
-  glitchThreshold:    0.62,
+  glitchThreshold:    0.33,
   glitchChance:       0.55,
   glitchScatter:      0.045,
   glitchTear:         0.020,
   glitchSeedInterval: 80,
   glitchCgaEnabled:   true,
   glitchDecayRate:    0.010,
-  glitchSmearChance:  0.10,
+  glitchSmearChance:  0.33,
   glitchDropChance:   0.025,
 
   // BG (background image) layer
@@ -152,6 +152,18 @@ window.V2_PARAMS = {
   bgOpacity:       0.55,
   bgLumaThreshold: 0.30,
   bgStutterAmp:    0.04,
+
+  // BG FX (audio-reactive CSS filters on the bg layer)
+  bgFxEnabled:    true,
+  bgFxHueShift:   0.0,
+  bgFxSaturation: 0.3,
+  bgFxBrightness: 0.2,
+  bgFxContrast:   0.2,
+  bgFxBlur:       0.0,
+  bgFxInvert:     0.0,
+  bgFxScalePulse: 0.0,
+  bgFxSepia:      0.0,
+  bgFxGrayscale:  0.0,
 
 };
 
@@ -201,5 +213,16 @@ window.V2_PARAM_RANGES = {
   bgOpacity:        { min: 0,    max: 1.0  },
   bgLumaThreshold:  { min: 0.1,  max: 0.8  },
   bgStutterAmp:     { min: 0,    max: 0.2  },
+
+  // BG FX (audio-reactive CSS filters on the bg layer)
+  bgFxHueShift:    { min: 0,   max: 180.0 },
+  bgFxSaturation:  { min: 0,   max: 2.0   },
+  bgFxBrightness:  { min: 0,   max: 1.0   },
+  bgFxContrast:    { min: 0,   max: 1.0   },
+  bgFxBlur:        { min: 0,   max: 4.0   },
+  bgFxInvert:      { min: 0,   max: 1.0   },
+  bgFxScalePulse:  { min: 0,   max: 0.3   },
+  bgFxSepia:       { min: 0,   max: 1.0   },
+  bgFxGrayscale:   { min: 0,   max: 1.0   },
 
 };
