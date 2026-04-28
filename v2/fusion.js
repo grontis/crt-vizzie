@@ -68,6 +68,10 @@ class V2FusionMode {
     this._waveBeatBoost   = 0;
     this._waveThreshBoost = 0;
 
+    // BG layer state
+    this._bgKickPulse    = 0; // float, decays each frame
+    this._bgStutterPhase = 0; // float, treble-driven stutter offset
+
     this._init(cols, rows);
   }
 
@@ -80,11 +84,12 @@ class V2FusionMode {
   // ── Public: per-frame update ─────────────────────────────────────────────
 
   /**
-   * @param {object} audio — { spectrum, bands, beatActive, beatIntensity }
+   * @param {object} audio    — { spectrum, bands, beatActive, beatIntensity }
    * @param {number} cols
    * @param {number} rows
+   * @param {V2BackgroundLayer|null} [bgLayer] — optional background luma source
    */
-  update(audio, cols, rows) {
+  update(audio, cols, rows, bgLayer = null) {
     if (cols !== this._cols || rows !== this._rows) {
       this._init(cols, rows);
     }
@@ -367,7 +372,7 @@ class V2FusionMode {
       this._glitchSeedTimer = 0;
     }
 
-    // ── Phase 4: Render — figure → wave → rain → glitch ──────────────────────
+    // ── Phase 4: Render — figure → wave → rain → glitch ─────────────────────
 
     // 4a. Figure
     if (p.figureEnabled) {
@@ -468,6 +473,7 @@ class V2FusionMode {
         }
       }
     }
+
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────

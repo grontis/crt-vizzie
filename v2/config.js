@@ -12,9 +12,10 @@
 window.V2_CONFIG = {
 
   // Font
-  FONT_FACE:    'GlassTTY VT220',
-  FONT_FILE:    '../fonts/Glass_TTY_VT220.ttf',
-  FONT_SIZE:    40,           // px — cell height
+  FONT_FACE:    'Orbitron',
+  FONT_FILE:    'fonts/Orbitron-VariableFont_wght.ttf',
+  FONT_WEIGHT:  800,          // variable font weight (100–900)
+  FONT_SIZE:    33,           // px — cell height
   CHAR_SPACING: 1.15,         // multiplier on measured glyph width
   LINE_SPACING: 1.10,         // multiplier on font size for row height
 
@@ -96,6 +97,8 @@ window.V2_PARAMS = {
 
   // Scanline darkening intensity (0 = off, 1 = very dark every other row)
   scanlineIntensity: 0.33,
+  // Scanline mode: 0=off, 1=pixel (every other px row), 2=cell-gap, 3=smooth
+  scanlineMode: 2,
 
   // Chromatic aberration base offset in pixels (0 = off)
   chromaBase:  1.5,
@@ -143,6 +146,12 @@ window.V2_PARAMS = {
   glitchSmearChance:  0.10,
   glitchDropChance:   0.025,
 
+  // BG (background image) layer
+  bgEnabled:       true,
+  bgOpacity:       0.55,
+  bgLumaThreshold: 0.30,
+  bgStutterAmp:    0.04,
+
 };
 
 // ── Param ranges for hardware bridge clamping ─────────────────────────────────
@@ -153,6 +162,7 @@ window.V2_PARAM_RANGES = {
   phosphorIndex:     { min: 0,     max: 4    },
 
   scanlineIntensity: { min: 0,     max: 1.0  },
+  scanlineMode:      { min: 0,     max: 3    },
   chromaBase:        { min: 0,     max: 8.0  },
   chromaBeat:        { min: 0,     max: 12.0 },
 
@@ -186,5 +196,9 @@ window.V2_PARAM_RANGES = {
   glitchDecayRate:    { min: 0.002, max: 0.05  },
   glitchSmearChance:  { min: 0,     max: 0.3   },
   glitchDropChance:   { min: 0,     max: 0.1   },
+
+  bgOpacity:        { min: 0,    max: 1.0  },
+  bgLumaThreshold:  { min: 0.1,  max: 0.8  },
+  bgStutterAmp:     { min: 0,    max: 0.2  },
 
 };

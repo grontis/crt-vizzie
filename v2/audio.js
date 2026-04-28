@@ -1,10 +1,11 @@
 // v2/audio.js — V2AudioManager
 // Raw Web Audio API — no p5.sound, no CDN dependencies.
 //
-// Three source modes:
+// Four source modes:
 //   'idle'  — all data zeroed
 //   'demo'  — procedural synthesizer (oscillator + LFO, no hardware required)
 //   'file'  — HTML <audio> element via MediaElementSourceNode
+//   'live'  — microphone via MediaStreamSourceNode (getUserMedia)
 //
 // AudioContext is created lazily on first call to resume() (user gesture).
 //
@@ -15,7 +16,7 @@
 class V2AudioManager {
 
   constructor() {
-    this._source = 'idle'; // 'idle' | 'demo' | 'file'
+    this._source = 'idle'; // 'idle' | 'demo' | 'file' | 'live'
 
     // Web Audio nodes (created lazily)
     this._ctx      = null;
@@ -32,6 +33,10 @@ class V2AudioManager {
     this._audioEl       = null;
     this._mediaSource   = null;
     this._blobUrl       = null;
+
+    // Live (microphone) audio
+    this._stream     = null; // MediaStream
+    this._liveSource = null; // MediaStreamSourceNode
 
     // Analysis buffers
     // _spectrum size derived from FFT_SIZE so demo and file paths always agree.
@@ -87,6 +92,7 @@ class V2AudioManager {
 
   enableDemoMode() {
     this._cleanupFileAudio();
+    this._cleanupLiveAudio();
     this._cleanupDemoNodes();
     this._source = 'demo';
     this._demoTime = 0;
@@ -102,6 +108,7 @@ class V2AudioManager {
 
   stopAudio() {
     this._cleanupFileAudio();
+    this._cleanupLiveAudio();
     this._cleanupDemoNodes();
     this._source = 'idle';
     this._resetBeatState();
@@ -116,6 +123,7 @@ class V2AudioManager {
    */
   loadAudioFile(file) {
     this._cleanupFileAudio();
+    this._cleanupLiveAudio();
     this._cleanupDemoNodes();
 
     if (this._blobUrl) {
@@ -158,10 +166,43 @@ class V2AudioManager {
     });
   }
 
+  /**
+   * Request microphone access and wire it into the existing audio graph.
+   * Returns a promise resolving to 'live' on success or 'error' on failure.
+   * @returns {Promise<'live' | 'error'>}
+   */
+  enableLiveMode() {
+    this._cleanupFileAudio();
+    this._cleanupLiveAudio();
+    this._cleanupDemoNodes();
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.warn('[V2Audio] getUserMedia not available in this context');
+      return Promise.resolve('error');
+    }
+
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then((stream) => {
+        if (!this._ctx) this.resume();
+        this._stream = stream;
+        this._liveSource = this._ctx.createMediaStreamSource(stream);
+        this._liveSource.connect(this._gain);
+        this._source = 'live';
+        this._resetBeatState();
+        console.log('[V2Audio] Live microphone input active');
+        return 'live';
+      })
+      .catch((err) => {
+        console.warn('[V2Audio] getUserMedia failed:', err);
+        return 'error';
+      });
+  }
+
   // ── Getters ─────────────────────────────────────────────────────────────────
 
   get isIdle()        { return this._source === 'idle'; }
   get isDemo()        { return this._source === 'demo'; }
+  get isLive()        { return this._source === 'live'; }
   get audioSource()   { return this._source; }
   get beatActive()    { return this._beatActive; }
   get beatIntensity() { return this._beatIntensity; }
@@ -325,7 +366,21 @@ class V2AudioManager {
       URL.revokeObjectURL(this._blobUrl);
       this._blobUrl = null;
     }
-    this._source = 'idle';
+    // Only reset to idle if we were actually in file mode — avoid clobbering
+    // other source states when called as part of a source switch.
+    if (this._source === 'file') this._source = 'idle';
+  }
+
+  _cleanupLiveAudio() {
+    if (this._liveSource) {
+      try { this._liveSource.disconnect(); } catch (_) {}
+      this._liveSource = null;
+    }
+    if (this._stream) {
+      try { this._stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+      this._stream = null;
+    }
+    if (this._source === 'live') this._source = 'idle';
   }
 
   _resetBeatState() {

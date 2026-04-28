@@ -6,9 +6,9 @@
   <title>GRONTIS.IO v2 — WebGL ASCII Visualizer</title>
   <style>
     @font-face {
-      font-family: 'GlassTTY VT220';
-      src: url('../fonts/Glass_TTY_VT220.ttf') format('truetype');
-      font-weight: normal;
+      font-family: 'Orbitron';
+      src: url('fonts/Orbitron-VariableFont_wght.ttf') format('truetype');
+      font-weight: 100 900;
       font-style: normal;
       font-display: block;
     }
@@ -29,10 +29,26 @@
       justify-content: center;
     }
 
+    #v2-bg-image {
+      position: fixed;
+      inset: 0;
+      background: url('background_images/lminalpool.jpg') center / cover no-repeat;
+      z-index: 0;
+      opacity: 0.85;
+      display: none;
+    }
+
+    #v2-bg-image.visible {
+      display: block;
+    }
+
     #v2-canvas {
       display: block;
       /* Canvas size is set in JS; CSS keeps it centered */
       image-rendering: pixelated;
+      mix-blend-mode: screen;
+      position: relative;
+      z-index: 1;
     }
 
     #v2-status {
@@ -42,7 +58,8 @@
       right: 0;
       background: rgba(0, 0, 0, 0.75);
       color: #00ff41;
-      font-family: 'GlassTTY VT220', monospace;
+      font-family: 'Orbitron', monospace;
+      font-weight: 800;
       font-size: 13px;
       padding: 4px 8px;
       white-space: nowrap;
@@ -51,10 +68,64 @@
       z-index: 100;
       pointer-events: none;
     }
+
+    /* ── Startup overlay ──────────────────────────────────────────────────── */
+
+    #v2-startup-overlay {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      opacity: 1;
+      transition: opacity 0.6s ease;
+    }
+
+    #v2-startup-overlay.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #v2-startup-terminal {
+      width: min(680px, 90vw);
+      font-family: 'Orbitron', monospace;
+      font-weight: 800;
+      font-size: clamp(12px, 1.4vw, 16px);
+      color: #00ff41;
+      line-height: 1.5;
+      text-shadow: 0 0 6px #00ff41;
+      white-space: pre-wrap;
+    }
+
+    #v2-boot-cursor {
+      display: inline-block;
+      animation: v2-blink 0.8s step-end infinite;
+    }
+
+    @keyframes v2-blink {
+      50% { opacity: 0; }
+    }
+
+    .v2-menu-item {
+      margin-top: 4px;
+      cursor: pointer;
+      padding: 2px 0;
+      transition: color 0.15s;
+    }
+
+    .v2-menu-item.selected,
+    .v2-menu-item:hover {
+      color: #000;
+      background: #00ff41;
+      text-shadow: none;
+    }
   </style>
 </head>
 <body>
 
+  <div id="v2-bg-image"></div>
   <canvas id="v2-canvas"></canvas>
   <div id="v2-status">[IDLE] Loading...</div>
 
@@ -64,6 +135,8 @@
   <script src="ascii-art.js"></script>
   <script src="renderer.js"></script>
   <script src="fusion.js"></script>
+  <script src="background.js"></script>
+  <script src="startup.js"></script>
   <script src="hardware-bridge.js"></script>
   <script src="sketch.js"></script>
 

@@ -29,6 +29,7 @@ uniform vec3  u_phosphorMid;
 uniform vec3  u_phosphorBright;
 uniform float u_chromaOffset;    // pixel shift for R and B channels
 uniform float u_scanline;        // scanline darkening (0 = off, 1 = full dark)
+uniform int   u_scanlineMode;    // 0=off 1=pixel 2=cell-gap 3=smooth
 uniform vec3  u_cgaColors[16];   // CGA 16-color palette
 
 in  vec2 v_uv;
@@ -114,13 +115,39 @@ void main() {
     baseColor.b * alphaB
   );
 
+  // ── Scanlines ────────────────────────────────────────────────────
+  // u_scanlineMode: 0=off, 1=pixel (every other px row),
+  //                 2=cell-gap (darken bottom of each cell row),
+  //                 3=smooth (sine falloff within each cell row)
   float scanFactor = 1.0;
-  if (u_scanline > 0.0) {
+  if (u_scanlineMode == 1) {
+    // PIXEL: darken every other display pixel row (original behaviour)
     int pixRow = int(gl_FragCoord.y);
     if ((pixRow & 1) == 0) {
       scanFactor = 1.0 - u_scanline;
     }
+  } else if (u_scanlineMode == 2) {
+    // CELL-GAP: darken the bottom ~20% of each character cell
+    // gapFrac controls what fraction of the cell height is the dark band.
+    // u_scanline scales its depth (0 = invisible, 1 = fully black).
+    float gapFrac = 0.20;
+    float cellH   = u_cellSize.y;
+    float gapPx   = cellH * gapFrac;
+    if (fragInCell.y >= (cellH - gapPx)) {
+      // Linear ramp: fully dark at the very bottom, transitions at gapPx boundary
+      float t = (fragInCell.y - (cellH - gapPx)) / gapPx;
+      scanFactor = 1.0 - u_scanline * t;
+    }
+  } else if (u_scanlineMode == 3) {
+    // SMOOTH: sine-based phosphor beam falloff within each cell row.
+    // sin(0..PI) = 0..1..0; brightest at cell center, dark at top/bottom edges.
+    // scanFactor approaches (1 - u_scanline) at the edges.
+    float cellH = u_cellSize.y;
+    float phase = fragInCell.y / cellH;          // 0..1 top to bottom
+    float beam  = sin(phase * 3.14159265);       // 0..1..0
+    scanFactor  = 1.0 - u_scanline * (1.0 - beam);
   }
+  // mode 0 (OFF): scanFactor stays 1.0
   color *= scanFactor;
 
   fragColor = vec4(color, 1.0);

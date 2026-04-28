@@ -13,16 +13,39 @@ python3 -m http.server 8080
 
 Then open **http://localhost:8080** in Chrome or Chromium. Press `D` to start demo mode.
 
+### Startup screen
+
+On load a retro terminal boot sequence appears with three audio source options:
+
+| Option | Action |
+|---|---|
+| `1` | Demo mode — plays built-in synthesizer |
+| `2` | Live input — uses microphone / line-in (`getUserMedia`) |
+| `3` | Load file — opens a file picker (MP3/OGG/WAV) |
+
+Arrow keys move the highlight; Enter confirms.
+
 ### Controls
 
 | Key | Action |
 |---|---|
 | `D` | Toggle demo synthesizer |
 | `A` | Load audio file (MP3/OGG/WAV) |
+| `B` | Toggle background image layer on/off |
+| `S` | Cycle scanline mode (OFF → PIXEL → CELL-GAP → SMOOTH) |
 | `P` | Cycle phosphor color (green → amber → blue → red → white) |
-| `F` | Toggle fullscreen |
+| `F` | Toggle fullscreen (works during startup screen too) |
 | `Escape` | Exit fullscreen |
 | Drop audio file | Load and loop as audio source |
+
+#### Scanline modes
+
+| Mode | Description |
+|---|---|
+| OFF | No scanlines |
+| PIXEL | Every other pixel row darkened (subtle texture) |
+| CELL-GAP | Dark retrace band at the bottom of each character row (default) |
+| SMOOTH | Sine falloff — bright at cell center, dim at top/bottom edges |
 
 ---
 

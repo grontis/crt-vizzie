@@ -4,9 +4,11 @@
 // Boot sequence:
 //   1. await document.fonts.ready
 //   2. Build glyph atlas from charset
-//   3. Init renderer, audio, fusion mode
-//   4. Wire input handlers (keyboard, drag-and-drop, file picker)
-//   5. Start requestAnimationFrame loop at TARGET_FPS
+//   3. Init renderer, audio manager, background layer
+//   4. await startupScreen.run() — blocks until user selects audio source
+//   5. applyChoice() — wires audio source, inits fusion mode
+//   6. Wire input handlers (keyboard, drag-and-drop, file picker)
+//   7. Start requestAnimationFrame loop at TARGET_FPS
 //
 // Load order: last
 
@@ -16,9 +18,10 @@
 
   // ── State ──────────────────────────────────────────────────────────────────
 
-  let renderer    = null;
+  let renderer     = null;
   let audioManager = null;
   let fusionMode   = null;
+  let bgLayer      = null;
 
   let _audioContextResumed = false;
   let _lastFrameTime       = 0;
@@ -65,7 +68,7 @@
   // ── Init ───────────────────────────────────────────────────────────────────
 
   async function init() {
-    // Wait for custom font to load
+    // 1. Wait for custom font to load
     try {
       await document.fonts.load(`${V2_CONFIG.FONT_SIZE}px "${V2_CONFIG.FONT_FACE}"`);
     } catch (e) {
@@ -87,7 +90,7 @@
     canvas.width  = V2_CONFIG.CANVAS_WIDTH;
     canvas.height = V2_CONFIG.CANVAS_HEIGHT;
 
-    // Create renderer (throws if WebGL 2 unavailable)
+    // 2. Create renderer (throws if WebGL 2 unavailable)
     try {
       renderer = new V2Renderer(canvas, V2_CONFIG);
     } catch (e) {
@@ -95,28 +98,84 @@
       return;
     }
 
-    // Build glyph atlas
+    // Build glyph atlas — must happen before startupScreen.run() so the
+    // atlas is ready the moment the render loop starts after selection.
     const charset = buildCharset();
     renderer.buildAtlas(charset);
 
-    // Create audio manager
+    // 3. Create audio manager
     audioManager = new V2AudioManager();
     window.audioManager = audioManager; // exposed for hardware-bridge.js
     window.renderer     = renderer;     // exposed for console debug (renderer.debugAtlas())
 
-    // Create fusion mode
+    // 4. Background layer — load image before startup screen so it is
+    //    ready to resample immediately after the user makes a selection.
+    bgLayer = new V2BackgroundLayer();
+    await bgLayer.loadDefault();
+
+    // 5. Startup screen — blocks here until user selects an audio source.
+    //    The render loop has NOT started yet, so the WebGL canvas is invisible
+    //    behind the overlay.
+
+    // Early fullscreen listener — active only during startup screen.
+    // Removed immediately after startupScreen.run() resolves so
+    // setupInputHandlers() can register its own F handler without duplication.
+    function earlyFullscreenHandler(e) {
+      if (e.key !== 'f' && e.key !== 'F') return;
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+    document.addEventListener('keydown', earlyFullscreenHandler);
+
+    const startupScreen = new V2StartupScreen(V2_CONFIG);
+    const choice = await startupScreen.run();
+    document.removeEventListener('keydown', earlyFullscreenHandler);
+
+    // 6. Apply audio source choice (calls audioManager.resume() — valid because
+    //    the startup screen interaction counts as a user gesture on non-kiosk paths)
+    await applyChoice(choice);
+
+    // 7. Resample background image to current grid dimensions, then init fusion mode
+    bgLayer.resample(renderer.cols, renderer.rows);
     fusionMode = new V2FusionMode(renderer.cols, renderer.rows, V2_CONFIG, charset);
 
-    // Wire event handlers
+    // 8. Wire event handlers, update status, start render loop
+    // Sync bg image div to initial V2_PARAMS.bgEnabled state
+    const bgImageEl = document.getElementById('v2-bg-image');
+    if (bgImageEl) bgImageEl.classList.toggle('visible', V2_PARAMS.bgEnabled);
+
     setupInputHandlers(canvas);
-
-    // Update status display
     updateStatus();
-
-    // Start the render loop
     requestAnimationFrame(loop);
 
-    console.log('[sketch] Init complete — press D for demo mode, A to load audio file');
+    console.log('[sketch] Init complete');
+  }
+
+  // ── Audio source selection ────────────────────────────────────────────────
+
+  async function applyChoice(choice) {
+    // Resume AudioContext — safe here because startup screen interaction is
+    // a user gesture on non-kiosk paths; on kiosk, --autoplay-policy=no-user-gesture-required
+    audioManager.resume();
+
+    if (choice === 'demo') {
+      audioManager.enableDemoMode();
+    } else if (choice === 'live') {
+      const result = await audioManager.enableLiveMode();
+      if (result === 'error') {
+        console.warn('[sketch] Live input failed — falling back to demo mode');
+        audioManager.enableDemoMode();
+      }
+    } else if (choice === 'file') {
+      // Open file picker; audio stays idle until user selects a file.
+      // The render loop starts immediately — fusionMode runs in idle state.
+      triggerFilePicker();
+    }
+
+    _audioContextResumed = true;
   }
 
   // ── Main loop ──────────────────────────────────────────────────────────────
@@ -148,7 +207,7 @@
         V2_PARAMS._chromaBeatCurrent * 0.85 +
         audioManager.beatIntensity * V2_PARAMS.chromaBeat * 0.15;
 
-      fusionMode.update(audio, renderer.cols, renderer.rows);
+      fusionMode.update(audio, renderer.cols, renderer.rows, bgLayer);
       renderer.upload(fusionMode.charIdx, fusionMode.bright16, fusionMode.cgaIdx);
     }
 
@@ -195,6 +254,21 @@
           // Cycle phosphor preset
           V2_PARAMS.phosphorIndex =
             (V2_PARAMS.phosphorIndex + 1) % V2_CONFIG.PHOSPHOR_ORDER.length;
+          updateStatus();
+          break;
+
+        case 'B': {
+          // Toggle background image visibility
+          V2_PARAMS.bgEnabled = !V2_PARAMS.bgEnabled;
+          const bgEl = document.getElementById('v2-bg-image');
+          if (bgEl) bgEl.classList.toggle('visible', V2_PARAMS.bgEnabled);
+          updateStatus();
+          break;
+        }
+
+        case 'S':
+          // Cycle scanline mode: OFF → PIXEL → CELL-GAP → SMOOTH → OFF
+          V2_PARAMS.scanlineMode = (V2_PARAMS.scanlineMode + 1) % 4;
           updateStatus();
           break;
 
@@ -262,6 +336,9 @@
     if (fusionMode) {
       fusionMode.reset(renderer.cols, renderer.rows);
     }
+    if (bgLayer) {
+      bgLayer.resample(renderer.cols, renderer.rows);
+    }
 
     console.log(`[sketch] Resize: ${w}×${h}, grid ${renderer.cols}×${renderer.rows}`);
   }
@@ -298,7 +375,10 @@
     const src = audioManager ? audioManager.audioSource : 'idle';
     const ph  = audioManager ? V2_CONFIG.PHOSPHOR_ORDER[V2_PARAMS.phosphorIndex] : '–';
     const glInfo = renderer ? renderer.glVersion : '–';
-    el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | ${glInfo} | D=demo A=file P=phosphor F=fullscreen`;
+    const SCANLINE_NAMES = ['OFF', 'PIXEL', 'CELL-GAP', 'SMOOTH'];
+    const scanName = SCANLINE_NAMES[V2_PARAMS.scanlineMode] || 'OFF';
+    const bgState  = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
+    el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | ${glInfo} | B=bg S=scanline P=phosphor F=full`;
   }
 
   // ── Error display ─────────────────────────────────────────────────────────
@@ -316,33 +396,14 @@
     console.error('[sketch] Fatal error:', msg);
   }
 
-  // ── Auto-start for unattended kiosk ───────────────────────────────────────
-  // If no user gesture arrives within 3 seconds, start demo mode automatically.
-  // Chromium kiosk flag --autoplay-policy=no-user-gesture-required is also
-  // needed for the AudioContext to work without a gesture.
-
-  function scheduleAutoDemo() {
-    setTimeout(() => {
-      if (!audioManager || audioManager.isIdle) {
-        console.log('[sketch] Auto-starting demo mode (kiosk)');
-        // Use the audio context resume without gesture guard
-        // (kiosk.sh sets --autoplay-policy=no-user-gesture-required)
-        if (audioManager) {
-          try {
-            audioManager.resume();
-          } catch (_) {}
-          audioManager.enableDemoMode();
-          updateStatus();
-        }
-      }
-    }, 3000);
-  }
-
   // ── Boot ──────────────────────────────────────────────────────────────────
+  // Kiosk auto-start is now handled inside V2StartupScreen (8s kiosk timer
+  // that auto-selects DEMO if no user input arrives after the menu appears).
+  // The --autoplay-policy=no-user-gesture-required Chromium flag is still
+  // required for the AudioContext to work without a gesture on Pi kiosk.
 
   document.addEventListener('DOMContentLoaded', async () => {
     await init();
-    scheduleAutoDemo();
   });
 
 }());
