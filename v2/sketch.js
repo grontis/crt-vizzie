@@ -267,8 +267,8 @@
         }
 
         case 'S':
-          // Cycle scanline mode: OFF → PIXEL → CELL-GAP → SMOOTH → OFF
-          V2_PARAMS.scanlineMode = (V2_PARAMS.scanlineMode + 1) % 4;
+          // Toggle scanline pixel mode on/off
+          V2_PARAMS.scanlineMode = V2_PARAMS.scanlineMode === 0 ? 1 : 0;
           updateStatus();
           break;
 
@@ -375,8 +375,7 @@
     const src = audioManager ? audioManager.audioSource : 'idle';
     const ph  = audioManager ? V2_CONFIG.PHOSPHOR_ORDER[V2_PARAMS.phosphorIndex] : '–';
     const glInfo = renderer ? renderer.glVersion : '–';
-    const SCANLINE_NAMES = ['OFF', 'PIXEL', 'CELL-GAP', 'SMOOTH'];
-    const scanName = SCANLINE_NAMES[V2_PARAMS.scanlineMode] || 'OFF';
+    const scanName = V2_PARAMS.scanlineMode ? 'ON' : 'OFF';
     const bgState  = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
     el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | ${glInfo} | B=bg S=scanline P=phosphor F=full`;
   }

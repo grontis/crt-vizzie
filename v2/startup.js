@@ -93,6 +93,9 @@ class V2StartupScreen {
     // Terminal container
     const terminal = document.createElement('div');
     terminal.id = 'v2-startup-terminal';
+    if (this._config.STARTUP_FONT_SIZE) {
+      terminal.style.fontSize = this._config.STARTUP_FONT_SIZE + 'px';
+    }
 
     // Boot output area
     const output = document.createElement('div');

@@ -12,12 +12,13 @@
 window.V2_CONFIG = {
 
   // Font
-  FONT_FACE:    'Orbitron',
-  FONT_FILE:    'fonts/Orbitron-VariableFont_wght.ttf',
-  FONT_WEIGHT:  800,          // variable font weight (100–900)
-  FONT_SIZE:    33,           // px — cell height
-  CHAR_SPACING: 1.15,         // multiplier on measured glyph width
-  LINE_SPACING: 1.10,         // multiplier on font size for row height
+  FONT_FACE:         'Orbitron',
+  FONT_FILE:         'fonts/Orbitron-VariableFont_wght.ttf',
+  FONT_WEIGHT:       800,          // variable font weight (100–900)
+  FONT_SIZE:         33,           // px — cell height (visualizer)
+  STARTUP_FONT_SIZE: 24,           // px — startup terminal text
+  CHAR_SPACING:      1.15,         // multiplier on measured glyph width
+  LINE_SPACING:      1.10,         // multiplier on font size for row height
 
   // Canvas
   CANVAS_WIDTH:  1280,
@@ -98,7 +99,7 @@ window.V2_PARAMS = {
   // Scanline darkening intensity (0 = off, 1 = very dark every other row)
   scanlineIntensity: 0.33,
   // Scanline mode: 0=off, 1=pixel (every other px row), 2=cell-gap, 3=smooth
-  scanlineMode: 2,
+  scanlineMode: 1,
 
   // Chromatic aberration base offset in pixels (0 = off)
   chromaBase:  1.5,
@@ -162,7 +163,7 @@ window.V2_PARAM_RANGES = {
   phosphorIndex:     { min: 0,     max: 4    },
 
   scanlineIntensity: { min: 0,     max: 1.0  },
-  scanlineMode:      { min: 0,     max: 3    },
+  scanlineMode:      { min: 0,     max: 1    },
   chromaBase:        { min: 0,     max: 8.0  },
   chromaBeat:        { min: 0,     max: 12.0 },
 
