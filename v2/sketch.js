@@ -207,6 +207,7 @@
         V2_PARAMS._chromaBeatCurrent * 0.85 +
         audioManager.beatIntensity * V2_PARAMS.chromaBeat * 0.15;
 
+      bgLayer.tick();
       fusionMode.update(audio, renderer.cols, renderer.rows, bgLayer);
       renderer.upload(fusionMode.charIdx, fusionMode.bright16, fusionMode.cgaIdx);
     }
@@ -281,6 +282,11 @@
           } else {
             document.exitFullscreen().catch(() => {});
           }
+          break;
+
+        case 'L':
+          // Load background image or video from file
+          triggerBgFilePicker();
           break;
 
         case 'ESCAPE':
@@ -367,6 +373,31 @@
     updateStatus();
   }
 
+  function triggerBgFilePicker() {
+    const input = document.createElement('input');
+    input.type   = 'file';
+    input.accept = 'image/*,video/*';
+    input.onchange = async () => {
+      if (input.files && input.files[0]) {
+        await loadBgFile(input.files[0]);
+      }
+    };
+    input.click();
+  }
+
+  async function loadBgFile(file) {
+    console.log('[sketch] Loading background file:', file.name);
+    await bgLayer.loadFromFile(file);
+    bgLayer.resample(renderer.cols, renderer.rows);
+    // Ensure bg layer is visible after loading a new file
+    if (!V2_PARAMS.bgEnabled) {
+      V2_PARAMS.bgEnabled = true;
+      const bgEl = document.getElementById('v2-bg-image');
+      if (bgEl) bgEl.classList.add('visible');
+    }
+    updateStatus();
+  }
+
   // ── Status overlay ────────────────────────────────────────────────────────
 
   function updateStatus() {
@@ -377,7 +408,7 @@
     const glInfo = renderer ? renderer.glVersion : '–';
     const scanName = V2_PARAMS.scanlineMode ? 'ON' : 'OFF';
     const bgState  = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
-    el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | ${glInfo} | B=bg S=scanline P=phosphor F=full`;
+    el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | ${glInfo} | B=bg S=scanline P=phosphor L=load-bg F=full`;
   }
 
   // ── Error display ─────────────────────────────────────────────────────────
