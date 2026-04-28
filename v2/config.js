@@ -119,26 +119,26 @@ window.V2_PARAMS = {
   figOpacity:      1.0,
 
   // Rain layer
-  rainSpeedMin:  0.001,
+  rainSpeedMin:  0.01,
   rainSpeedMax:  0.1,
-  rainBeatMult:  3.2,
-  rainTrail:     4,
+  rainBeatMult:  8.2,
+  rainTrail:     6,
   rainInteract:  0.50,
   rainBurnBoost: 0.20,
   rainOpacity:   0.5,
 
   // Wave layer
-  waveOpacity:    0.75,
+  waveOpacity:    0.66,
   waveThreshold:  0.60,
   waveSpeed:      0.04,
-  waveBeatBoost:  0.18,
+  waveBeatBoost:  0.33,
   waveBeatDecay:  0.06,
   waveThreshDrop: 0.18,
   waveCharRate:   0.006,
 
   // Glitch layer
   glitchThreshold:    0.33,
-  glitchChance:       0.55,
+  glitchChance:       0.33,
   glitchScatter:      0.045,
   glitchTear:         0.020,
   glitchSeedInterval: 80,
@@ -149,17 +149,17 @@ window.V2_PARAMS = {
 
   // BG (background image) layer
   bgEnabled:       true,
-  bgOpacity:       0.55,
+  bgOpacity:       0.70,
   bgLumaThreshold: 0.30,
   bgStutterAmp:    0.04,
 
   // BG FX (audio-reactive CSS filters on the bg layer)
   bgFxEnabled:    true,
-  bgFxHueShift:   0.0,
-  bgFxSaturation: 0.3,
+  bgFxHueShift:   40.0,
+  bgFxSaturation: 2.0,
   bgFxBrightness: 0.2,
   bgFxContrast:   0.2,
-  bgFxBlur:       0.0,
+  bgFxBlur:       1.0,
   bgFxInvert:     0.0,
   bgFxScalePulse: 0.0,
   bgFxSepia:      0.0,
