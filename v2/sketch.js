@@ -192,6 +192,11 @@
 
     setupInputHandlers(canvas);
     updateStatus();
+
+    // Apply any pre-existing fullscreen state — user may have pressed F during
+    // the startup screen, before the resize/fullscreenchange listeners existed.
+    onResize();
+
     requestAnimationFrame(loop);
 
     console.log('[sketch] Init complete');
