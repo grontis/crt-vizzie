@@ -25,6 +25,10 @@
   let bgFx         = null;
   let bgFxPanel    = null;
 
+  let _bgPlaylist       = [];   // string[] of resolved URL paths from manifest
+  let _bgIndex          = -1;   // current playlist position; -1 = no manifest / off-playlist
+  let _statusFlashTimer = null; // setTimeout handle for transient status flash
+
   let _audioContextResumed = false;
   let _lastFrameTime       = 0;
   const FRAME_INTERVAL     = V2_CONFIG.FRAME_BUDGET; // ms between frames
@@ -147,7 +151,7 @@
     // 4. Background layer — load image before startup screen so it is
     //    ready to resample immediately after the user makes a selection.
     bgLayer = new V2BackgroundLayer();
-    await bgLayer.loadDefault();
+    await loadBgManifest();
     bgFx = new BgFxManager();
     bgFxPanel = new BgFxPanel();
 
@@ -224,6 +228,72 @@
     }
 
     _audioContextResumed = true;
+  }
+
+  // ── Background media manifest ─────────────────────────────────────────────
+
+  async function loadBgManifest() {
+    const folder = V2_CONFIG.BG_MEDIA_FOLDER;
+    if (!folder) return;
+
+    let entries;
+    try {
+      const res = await fetch(`${folder}/manifest.json`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      entries = await res.json();
+    } catch (e) {
+      console.warn('[sketch] bg manifest fetch failed — bg layer will be empty:', e.message);
+      return;
+    }
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      console.warn('[sketch] bg manifest is empty or invalid — bg layer will be empty');
+      return;
+    }
+
+    _bgPlaylist = entries.map(f => `${folder}/${f}`);
+    _bgIndex = 0;
+    await bgLayer.loadFromUrl(_bgPlaylist[0]);
+    if (!bgLayer.isLoaded) {
+      console.warn('[sketch] First manifest entry failed to load — bg layer empty');
+      _bgIndex = -1;
+      _bgPlaylist = [];
+    }
+  }
+
+  async function cycleBgMedia(delta) {
+    if (_bgPlaylist.length === 0) {
+      flashStatus('[NO MANIFEST]', true);
+      return;
+    }
+
+    const len = _bgPlaylist.length;
+    let attempts = 0;
+
+    do {
+      _bgIndex = ((_bgIndex + delta) % len + len) % len;
+      attempts++;
+      const url = _bgPlaylist[_bgIndex];
+      const filename = url.split('/').pop();
+      await bgLayer.loadFromUrl(url);
+
+      if (bgLayer.isLoaded) {
+        bgLayer.resample(renderer.cols, renderer.rows);
+        if (!V2_PARAMS.bgEnabled) {
+          V2_PARAMS.bgEnabled = true;
+          const bgEl = document.getElementById('v2-bg-image');
+          if (bgEl) bgEl.classList.add('visible');
+        }
+        flashStatus(`bg: ${filename}`, false);
+        return;
+      }
+
+      flashStatus(`[ERR] ${filename}`, true);
+      if (attempts < len) await new Promise(r => setTimeout(r, 600));
+
+    } while (attempts < len);
+
+    flashStatus('[ERR] all bg entries failed', true);
   }
 
   // ── Main loop ──────────────────────────────────────────────────────────────
@@ -304,6 +374,13 @@
         e.preventDefault();
         const visible = bgFxPanel.toggle();
         if (visible) bgFxPanel.syncState();
+        return;
+      }
+
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (bgFxPanel.isVisible && bgFxPanel.contains(document.activeElement)) return;
+        e.preventDefault();
+        cycleBgMedia(e.key === 'ArrowRight' ? 1 : -1);
         return;
       }
 
@@ -484,6 +561,7 @@
     console.log('[sketch] Loading background file:', file.name);
     await bgLayer.loadFromFile(file);
     bgLayer.resample(renderer.cols, renderer.rows);
+    _bgIndex = -1; // manually loaded file is off-playlist
     // Ensure bg layer is visible after loading a new file
     if (!V2_PARAMS.bgEnabled) {
       V2_PARAMS.bgEnabled = true;
@@ -497,6 +575,21 @@
 
   const SCANLINE_NAMES = ['OFF', 'PIXEL', 'CELL-GAP', 'SMOOTH'];
 
+  function flashStatus(text, isError) {
+    if (_statusFlashTimer !== null) {
+      clearTimeout(_statusFlashTimer);
+      _statusFlashTimer = null;
+    }
+    if (!_statusInfoEl) return;
+    _statusInfoEl.textContent = text;
+    _statusInfoEl.style.color = isError ? '#ff4444' : '';
+    _statusFlashTimer = setTimeout(() => {
+      _statusFlashTimer = null;
+      if (_statusInfoEl) _statusInfoEl.style.color = '';
+      updateStatus();
+    }, 3000);
+  }
+
   function updateStatus() {
     if (!_statusInfoEl && !_statusHelpEl) return;
     const src = audioManager ? audioManager.audioSource : 'idle';
@@ -509,7 +602,7 @@
       _statusInfoEl.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | bgfx:${bgFxState} | ${glInfo}`;
     }
     if (_statusHelpEl) {
-      _statusHelpEl.textContent = ' | B=bg X=bgfx S=scanline P=phosphor L=load-bg F=full';
+      _statusHelpEl.textContent = ' | B=bg X=bgfx S=scanline P=phosphor L=load-bg ←/→=cycle-bg F=full';
     }
   }
 

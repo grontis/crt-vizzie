@@ -36,6 +36,9 @@ window.V2_CONFIG = {
   // 20 columns × ~22 rows = ~440 slots — covers ~423 chars after box-drawing + symbolic expansion
   ATLAS_COLS: 20,             // characters per row in glyph atlas
 
+  // Background media folder (relative to v2/; must contain manifest.json)
+  BG_MEDIA_FOLDER: 'bg-media',
+
   // Audio analysis
   FFT_SIZE:        1024,
   FFT_SMOOTHING:   0.65,

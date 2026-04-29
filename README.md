@@ -32,6 +32,8 @@ Arrow keys move the highlight; Enter confirms.
 | `D` | Toggle demo synthesizer |
 | `A` | Load audio file (MP3/OGG/WAV) |
 | `B` | Toggle background image layer on/off |
+| `L` | Load a single background image or video from file |
+| `←` / `→` | Cycle through background media playlist (see below) |
 | `S` | Cycle scanline mode (OFF → PIXEL → CELL-GAP → SMOOTH) |
 | `P` | Cycle phosphor color (green → amber → blue → red → white) |
 | `F` | Toggle fullscreen (works during startup screen too) |
@@ -46,6 +48,61 @@ Arrow keys move the highlight; Enter confirms.
 | PIXEL | Every other pixel row darkened (subtle texture) |
 | CELL-GAP | Dark retrace band at the bottom of each character row (default) |
 | SMOOTH | Sine falloff — bright at cell center, dim at top/bottom edges |
+
+---
+
+## Background media
+
+The visualizer can cycle through a folder of images and videos as the layer behind the ASCII grid. Files are user-supplied (not in the repo) and discovered via a `manifest.json` listing.
+
+**Supported formats:** `.jpg .jpeg .png .gif .webp` (images) — `.mp4 .webm .mov` (video, looped + muted).
+
+> **Got `.mkv` files?** Chrome and Firefox don't support Matroska in HTML5 `<video>`. Remux to MP4 — for most files this is lossless and fast (no re-encode):
+>
+> ```bash
+> ffmpeg -i input.mkv -c copy output.mp4
+> ```
+>
+> If `ffmpeg` complains about an incompatible audio codec (e.g., FLAC), re-encode just the audio:
+>
+> ```bash
+> ffmpeg -i input.mkv -c:v copy -c:a aac output.mp4
+> ```
+
+### Setup
+
+1. Drop your media files into `v2/bg-media/`. The folder is gitignored except for `.gitkeep` and the helper script, so your files won't be committed.
+
+   ```bash
+   cp ~/Pictures/foo.jpg ~/Videos/bar.mp4 v2/bg-media/
+   ```
+
+2. Regenerate the manifest:
+
+   ```bash
+   python3 v2/bg-media/gen-manifest.py
+   ```
+
+   The script scans `v2/bg-media/` for supported extensions, sorts alphabetically, and writes `manifest.json` next to itself. Re-run any time you add or remove files.
+
+3. Reload the page. The first manifest entry loads automatically as the background.
+
+If `manifest.json` is missing or empty, the background layer simply stays off — no error, the visualizer still runs.
+
+### Usage
+
+| Key | Action |
+|---|---|
+| `→` | Next file in the playlist (wraps to first at the end) |
+| `←` | Previous file (wraps to last at the start) |
+| `B` | Toggle the background layer on/off |
+| `L` | Load a single file from outside the folder (clears playlist position) |
+
+The current filename briefly flashes in the status bar on each cycle. If a file fails to load, the cycle skips to the next entry and shows the error in red.
+
+### Custom folder
+
+To point at a different directory, edit `V2_CONFIG.BG_MEDIA_FOLDER` in `v2/config.js`. The path is resolved relative to `v2/` (the HTTP server root), so a folder served at `v2/my-media/` would be `BG_MEDIA_FOLDER: 'my-media'`.
 
 ---
 

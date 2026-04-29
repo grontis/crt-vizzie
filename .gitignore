@@ -10,3 +10,8 @@ __pycache__/
 # Abandoned Tauri experiment
 src-tauri/
 
+# Background media assets (user-supplied; not committed)
+v2/bg-media/
+!v2/bg-media/.gitkeep
+!v2/bg-media/gen-manifest.py
+

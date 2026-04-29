@@ -4,7 +4,8 @@
 //
 // Usage:
 //   const bg = new V2BackgroundLayer()
-//   await bg.loadDefault()                     // resolves when image is ready
+//   await bg.loadFromUrl(url)                  // load from a server path (manifest entry)
+//   await bg.loadFromFile(file)                // load from a user-selected File object
 //   bg.resample(renderer.cols, renderer.rows)  // called on init + resize
 //   bg.tick()                                  // call each frame — no-op for images, resamples video
 //   const luma = bg.getLuma(c, r)              // returns float in [0, 1]
@@ -31,26 +32,26 @@ class V2BackgroundLayer {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
+  get isLoaded() { return this._loaded; }
+
   /**
-   * Load the default background image.
-   * Resolves when the image is ready (or fails gracefully with a warning).
+   * Load a background image or video from a server URL (no object URL needed).
+   * Revokes any existing object URL from a prior loadFromFile call.
+   * Extension sniffing: .mp4 / .webm / .mov -> video; everything else -> image.
+   * @param {string} url
    * @returns {Promise<void>}
    */
-  loadDefault() {
-    return new Promise((resolve) => {
-      this._img.onload = () => {
-        this._source  = this._img;
-        this._isVideo = false;
-        this._loaded  = true;
-        if (this._cols > 0 && this._rows > 0) this.resample(this._cols, this._rows);
-        resolve();
-      };
-      this._img.onerror = () => {
-        console.warn('[V2BackgroundLayer] Failed to load background image — getLuma() will return 0.5');
-        resolve();
-      };
-      this._img.src = 'background_images/lminalpool.jpg';
-    });
+  loadFromUrl(url) {
+    if (this._objURL) {
+      URL.revokeObjectURL(this._objURL);
+      this._objURL = null;
+    }
+    this._loaded = false;
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    if (ext === 'mp4' || ext === 'webm' || ext === 'mov') {
+      return this._loadVideo(url);
+    }
+    return this._loadImage(url);
   }
 
   /**
@@ -86,7 +87,7 @@ class V2BackgroundLayer {
 
   /**
    * Downsample the current source to cols×rows and compute per-cell luma values.
-   * Must be called on init (after loadDefault resolves) and on every resize.
+   * Must be called after a successful load and on every resize.
    * @param {number} cols
    * @param {number} rows
    */

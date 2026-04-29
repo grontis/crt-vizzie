@@ -38,7 +38,9 @@ Files inside `v2/` must be loaded in this order (enforced by `<script>` tags in 
 | 10 | `hardware-bridge.js` | WebSocket listener, maps hardware param keys to `V2_PARAMS` |
 | 11 | `sketch.js` | Main loop, init, input handlers, status bar |
 
-Supporting assets: `fonts/`, `background_images/`, `shaders/` (reference copies of GLSL).
+Supporting assets: `fonts/`, `shaders/` (reference copies of GLSL).
+
+`v2/bg-media/` — gitignored directory for user-supplied background images and videos. Contains `gen-manifest.py` and `.gitkeep` (both tracked). Populate with media files and run `gen-manifest.py` to produce `manifest.json` for the cycle feature.
 
 ---
 
@@ -58,6 +60,11 @@ Used by `hardware-bridge.js` to clamp incoming hardware values before writing th
 
 Do not add new tunable parameters to `V2_PARAMS` without also adding a corresponding entry
 in `V2_PARAM_RANGES`.
+
+**`V2_CONFIG.BG_MEDIA_FOLDER`** — string path (relative to `v2/`) for the background media
+directory. Default: `'bg-media'`. The app fetches `${BG_MEDIA_FOLDER}/manifest.json` on
+startup and auto-loads the first entry. Arrow keys cycle through the playlist. Set to `''`
+or `null` to disable the feature.
 
 ---
 
@@ -108,8 +115,9 @@ removes this requirement.
 ### `background.js` — V2BackgroundLayer
 
 Manages a CSS `background-image` on the fixed `#v2-bg-image` div. Handles loading from a
-local file (image or video). Provides `resample()` which samples the current background into
-a luma array for use by `fusion.js` (background-influenced cell brightness).
+server URL (`loadFromUrl(url)`) or a local file (`loadFromFile(file)`). Provides `resample()`
+which samples the current background into a luma array for use by `fusion.js`
+(background-influenced cell brightness).
 
 ### `bg-fx.js` — BgFxManager
 
@@ -154,6 +162,7 @@ startup screen, input wiring) and runs the `requestAnimationFrame` loop gated at
 | S | Cycle scanline mode: OFF → PIXEL → CELL-GAP → SMOOTH → OFF |
 | P | Cycle phosphor preset (green → amber → blue → red → white → ...) |
 | L | Load background image or video from file |
+| ArrowLeft / ArrowRight | Cycle backward/forward through the bg-media playlist (wrap-around) |
 | F | Toggle fullscreen |
 | Tab | Toggle bg FX panel (when panel is open, Tab moves focus between controls) |
 | Esc | Close bg FX panel if open; exit fullscreen otherwise |
