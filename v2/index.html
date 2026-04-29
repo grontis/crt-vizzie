@@ -69,6 +69,25 @@
       pointer-events: none;
     }
 
+    @media (max-width: 800px) {
+      .v2-status-help { display: none; }
+    }
+
+    #v2-perf-overlay {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      background: rgba(0, 0, 0, 0.75);
+      color: #00ff41;
+      font-family: 'Orbitron', monospace;
+      font-weight: 800;
+      font-size: 12px;
+      padding: 4px 8px;
+      pointer-events: none;
+      z-index: 100;
+      display: none;
+    }
+
     /* ── Startup overlay ──────────────────────────────────────────────────── */
 
     #v2-startup-overlay {
@@ -127,7 +146,8 @@
 
   <div id="v2-bg-image"></div>
   <canvas id="v2-canvas"></canvas>
-  <div id="v2-status">[IDLE] Loading...</div>
+  <div id="v2-status"><span id="v2-status-info">[IDLE] Loading...</span><span class="v2-status-help"></span></div>
+  <div id="v2-perf-overlay"></div>
 
   <!-- Load order is critical — config first, sketch last -->
   <script src="config.js"></script>

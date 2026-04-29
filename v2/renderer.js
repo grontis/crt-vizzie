@@ -12,7 +12,7 @@
 // These are also saved as shaders/vert.glsl and shaders/frag.glsl for reference.
 
 const VERT_SRC = `#version 300 es
-precision mediump float;
+precision highp float;
 
 // Full-screen quad: clip-space positions passed in as attribute
 in vec2 a_pos;
@@ -26,9 +26,9 @@ void main() {
 `;
 
 const FRAG_SRC = `#version 300 es
-precision mediump float;
-precision highp   int;
-precision highp   usampler2D;
+precision highp float;
+precision highp int;
+precision highp usampler2D;
 
 // ── Samplers ────────────────────────────────────────────────────────
 // Glyph atlas: GL_R8 texture — one channel, white glyph on black background

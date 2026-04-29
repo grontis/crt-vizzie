@@ -29,6 +29,14 @@
   let _lastFrameTime       = 0;
   const FRAME_INTERVAL     = V2_CONFIG.FRAME_BUDGET; // ms between frames
 
+  // Perf overlay state
+  let _perfOverlayVisible    = false;
+  let _perfOverlayEl         = null;
+  let _statusInfoEl          = null;
+  let _statusHelpEl          = null;
+  const _frameTimes          = new Float32Array(60);
+  let _frameTimeIdx          = 0;
+
   // ── Charset ────────────────────────────────────────────────────────────────
   // Build the full charset array: space first (index 0), then all characters
   // used by fusion mode. The atlas index for each char is its position here.
@@ -53,7 +61,33 @@
     // Dot for spectrum bar chart
     set.add('·');
 
+    // Full box-drawing Unicode block (U+2500–U+257F) — covers all border chars
+    // used in ascii-art.js figures (─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ═ ║ ╔ ╗ ╚ ╝ ╠ ╣ ╱ ╲ etc.)
+    for (let i = 0x2500; i <= 0x257F; i++) set.add(String.fromCharCode(i));
+
+    // Symbolic chars confirmed present in ascii-art.js figures but outside the box-drawing block
+    for (const ch of '†‡⌐⌘⌬◈◉◊★☽☾✓✦✧⟲') set.add(ch);
+
     const charset = [...set];
+
+    // Dev-mode validator: warn about any ascii-art chars missing from the just-built charset.
+    // Runs once at startup; negligible cost.
+    if (typeof AsciiArtLibrary !== 'undefined') {
+      const charsetSet = new Set(charset);
+      const missingChars = new Set();
+      for (const fig of AsciiArtLibrary.figures) {
+        for (const frames of fig.frames) {
+          for (const row of frames) {
+            for (const ch of row) {
+              if (ch !== ' ' && !charsetSet.has(ch)) missingChars.add(ch);
+            }
+          }
+        }
+      }
+      if (missingChars.size > 0) {
+        console.warn('[sketch] Charset missing chars used in ascii-art figures:', [...missingChars].join(' '));
+      }
+    }
 
     // Validate charset fits within the atlas capacity
     const atlasCols = V2_CONFIG.ATLAS_COLS;
@@ -80,12 +114,12 @@
 
     // Check font actually loaded
     const fontLoaded = [...document.fonts].some(f =>
-      f.family.includes('GlassTTY') && f.status === 'loaded'
+      f.family.includes(V2_CONFIG.FONT_FACE) && f.status === 'loaded'
     );
     if (!fontLoaded) {
-      console.warn('[sketch] GlassTTY font not loaded — atlas will use fallback font');
+      console.warn(`[sketch] ${V2_CONFIG.FONT_FACE} font not loaded — atlas will use fallback font`);
     } else {
-      console.log('[sketch] GlassTTY font loaded OK');
+      console.log(`[sketch] ${V2_CONFIG.FONT_FACE} font loaded OK`);
     }
 
     const canvas = document.getElementById('v2-canvas');
@@ -151,6 +185,11 @@
     const bgImageEl = document.getElementById('v2-bg-image');
     if (bgImageEl) bgImageEl.classList.toggle('visible', V2_PARAMS.bgEnabled);
 
+    // Cache overlay and status span elements
+    _perfOverlayEl = document.getElementById('v2-perf-overlay');
+    _statusInfoEl  = document.getElementById('v2-status-info');
+    _statusHelpEl  = document.querySelector('.v2-status-help');
+
     setupInputHandlers(canvas);
     updateStatus();
     requestAnimationFrame(loop);
@@ -190,7 +229,11 @@
       requestAnimationFrame(loop);
       return;
     }
+    const _prevFrameTime = _lastFrameTime;
     _lastFrameTime = timestamp;
+    if (_prevFrameTime > 0) {
+      _frameTimes[_frameTimeIdx++ % 60] = timestamp - _prevFrameTime;
+    }
 
     // Update audio
     audioManager.update();
@@ -220,6 +263,16 @@
     // Always render (renderer draws black when no data)
     renderer.render(V2_PARAMS);
 
+    // Update perf overlay if visible
+    if (_perfOverlayVisible && _perfOverlayEl && _frameTimeIdx > 0) {
+      const count = Math.min(_frameTimeIdx, 60);
+      let sum = 0;
+      for (let i = 0; i < count; i++) sum += _frameTimes[i];
+      const avg = sum / count;
+      const fps = Math.round(1000 / avg);
+      _perfOverlayEl.textContent = `${avg.toFixed(1)}ms | ${fps}fps (target: ${V2_CONFIG.TARGET_FPS})`;
+    }
+
     requestAnimationFrame(loop);
   }
 
@@ -239,6 +292,10 @@
       resumeAudio();
 
       if (e.key === 'Tab') {
+        // If the panel is open and focus is inside it, let Tab traverse panel controls normally
+        if (bgFxPanel.isVisible && bgFxPanel.contains(document.activeElement)) {
+          return;
+        }
         e.preventDefault();
         const visible = bgFxPanel.toggle();
         if (visible) bgFxPanel.syncState();
@@ -282,8 +339,8 @@
         }
 
         case 'S':
-          // Toggle scanline pixel mode on/off
-          V2_PARAMS.scanlineMode = V2_PARAMS.scanlineMode === 0 ? 1 : 0;
+          // Cycle scanline mode: 0=off → 1=pixel → 2=cell-gap → 3=smooth → 0
+          V2_PARAMS.scanlineMode = (V2_PARAMS.scanlineMode + 1) % 4;
           updateStatus();
           break;
 
@@ -304,6 +361,10 @@
           break;
 
         case 'ESCAPE':
+          if (bgFxPanel.isVisible) {
+            bgFxPanel.hide();
+            break;
+          }
           if (document.fullscreenElement) {
             document.exitFullscreen().catch(() => {});
           }
@@ -319,6 +380,14 @@
         case '`':
           // Debug: show atlas
           if (renderer) renderer.debugAtlas();
+          break;
+
+        case '~':
+          // Toggle perf overlay
+          _perfOverlayVisible = !_perfOverlayVisible;
+          if (_perfOverlayEl) {
+            _perfOverlayEl.style.display = _perfOverlayVisible ? 'block' : 'none';
+          }
           break;
       }
     });
@@ -352,8 +421,8 @@
 
     let w, h;
     if (document.fullscreenElement) {
-      w = window.screen.width;
-      h = window.screen.height;
+      w = window.innerWidth;
+      h = window.innerHeight;
     } else {
       w = V2_CONFIG.CANVAS_WIDTH;
       h = V2_CONFIG.CANVAS_HEIGHT;
@@ -421,16 +490,22 @@
 
   // ── Status overlay ────────────────────────────────────────────────────────
 
+  const SCANLINE_NAMES = ['OFF', 'PIXEL', 'CELL-GAP', 'SMOOTH'];
+
   function updateStatus() {
-    const el = document.getElementById('v2-status');
-    if (!el) return;
+    if (!_statusInfoEl && !_statusHelpEl) return;
     const src = audioManager ? audioManager.audioSource : 'idle';
     const ph  = audioManager ? V2_CONFIG.PHOSPHOR_ORDER[V2_PARAMS.phosphorIndex] : '–';
-    const glInfo   = renderer ? renderer.glVersion : '–';
-    const scanName = V2_PARAMS.scanlineMode ? 'ON' : 'OFF';
-    const bgState  = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
+    const glInfo    = renderer ? renderer.glVersion : '–';
+    const scanName  = SCANLINE_NAMES[V2_PARAMS.scanlineMode] ?? 'OFF';
+    const bgState   = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
     const bgFxState = V2_PARAMS.bgFxEnabled ? 'ON' : 'OFF';
-    el.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | bgfx:${bgFxState} | ${glInfo} | B=bg X=bgfx S=scanline P=phosphor L=load-bg F=full`;
+    if (_statusInfoEl) {
+      _statusInfoEl.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | bgfx:${bgFxState} | ${glInfo}`;
+    }
+    if (_statusHelpEl) {
+      _statusHelpEl.textContent = ' | B=bg X=bgfx S=scanline P=phosphor L=load-bg F=full';
+    }
   }
 
   // ── Error display ─────────────────────────────────────────────────────────

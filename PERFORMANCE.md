@@ -111,6 +111,10 @@ Every call in this path is either a direct typed-array write, a WebGL API call, 
 
 The v2 MVP does not include a background image/video layer. The `getImageData()` / `putImageData()` CPU pixel pipeline from v1 is gone entirely. The visual effects it provided — chromatic aberration, scanlines — are now implemented in the GLSL fragment shader at zero CPU cost.
 
+#### Update — v2 today (2026-04-28)
+
+A background image/video layer was subsequently reintroduced in `v2/background.js`, rendered as a CSS `background-image` on a fixed `<div>` below the WebGL canvas. Audio-reactive visual effects on that layer (hue rotation, saturation, brightness, scale pulse) are applied via CSS `filter` and `transform` properties in `v2/bg-fx.js`. These properties are resolved by the GPU compositor — no `getImageData()` or `putImageData()` is ever called. This is architecturally distinct from the v1 pixel pipeline described above, so the performance improvement of Fix 3 still holds in full. The key invariant is that the CPU never reads back pixel data from either the WebGL canvas or the background layer.
+
 ### Fix 4: typed arrays throughout, no per-frame GC
 
 v1 represented the character grid as a 2D array of objects: `grid[row][col] = { char, brightness }`. Every frame, the render loop accessed thousands of these objects, generating pointer indirection and GC pressure.

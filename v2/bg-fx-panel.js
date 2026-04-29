@@ -218,6 +218,16 @@ class BgFxPanel {
     return nowVisible;
   }
 
+  /** @returns {boolean} true if the panel is currently visible. */
+  get isVisible() {
+    return this._panel.style.display !== 'none' && this._panel.style.display !== '';
+  }
+
+  /** @returns {boolean} true if el is the panel or a descendant of it. */
+  contains(el) {
+    return this._panel.contains(el);
+  }
+
   // ── State sync ─────────────────────────────────────────────────────────────
 
   /**

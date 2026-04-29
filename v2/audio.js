@@ -99,11 +99,10 @@ class V2AudioManager {
     this._demoBeatPulse = 0;
     this._resetBeatState();
 
-    // Build a simple oscillator graph: bass tone + LFO tremolo
-    if (this._ctx) {
-      this._buildDemoGraph();
-    }
-    // If ctx isn't created yet (no user gesture), demo mode still works via CPU path
+    // Ensure AudioContext exists before building the oscillator graph.
+    // resume() is idempotent: creates the ctx if absent, resumes if suspended.
+    this.resume();
+    this._buildDemoGraph();
   }
 
   stopAudio() {
@@ -126,9 +125,6 @@ class V2AudioManager {
     this._cleanupLiveAudio();
     this._cleanupDemoNodes();
 
-    if (this._blobUrl) {
-      URL.revokeObjectURL(this._blobUrl);
-    }
     this._blobUrl = URL.createObjectURL(file);
 
     return new Promise((resolve) => {

@@ -1,90 +1,211 @@
-# CLAUDE.md
+# CLAUDE.md — crt-vizzie architecture guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the entry point for any AI agent or contributor starting a new session on this repo.
+Read it before touching any code.
 
-## Running locally
+---
 
-Browsers block audio access from `file:///`. Always serve over HTTP:
-
-```bash
-npx serve .
-# or
-python -m http.server 8080   # then open http://localhost:8080
-```
-
-No build step. No dependencies to install. All libraries loaded from CDN (`p5.js`, `p5.sound`).
-
-## Architecture
-
-This is a vanilla JS app — no bundler, no framework. Script load order in `index.html` is critical:
+## Repository layout
 
 ```
-config.js → audio.js → background.js → ascii-art.js
-  → fusion-params.js → background-fx.js
-  → modes/*.js → modes/fusion.js
-  → fusion-panel.js → fusion-automation.js
-  → vj-sync.js → sketch.js (always last)
+crt-vizzie/
+  v2/              active application (WebGL 2 ASCII visualizer)
+  pi/              hardware bridge for Raspberry Pi (currently being rewritten — do not rely on its contents)
+  PERFORMANCE.md   analysis of v1 bottlenecks and v2 fixes
+  README.md        user-facing overview
+  REPORT.md        audit findings and improvement notes (2026-04-28)
 ```
 
-**`config.js`** — single `CONFIG` object. All tuneable constants live here. No logic.
+There is no v1 directory on this branch. There is no `modes/` directory. There is no p5.js.
 
-**`audio.js` — `AudioManager`** — owns all audio state. Three sources: `'idle'` (zeroed data), `'demo'` (procedural synthesizer, no hardware), `'file'` (p5.SoundFile looping a loaded file). Exposes `getSpectrum()`, `getWaveform()`, `getBands()`, `beatActive`, `beatIntensity`. Called by `sketch.js` each frame via `audioManager.update()`.
+---
 
-**`sketch.js`** — p5 instance mode entry point. Owns the character grid (`grid[row][col] = { char, brightness }`), render loop, keyboard handling, and idle typewriter animation. Exposes `window.setCell` and `window.setString` so mode files can write to the grid directly. All UI control functions (`toggleDemo`, `cyclePhosphor`, etc.) are assigned to `window.*` in `p.setup`.
+## v2 application — file layout and load order
 
-**`background.js` — `BackgroundLayer`** — manages an `<img>`/`<video>` DOM element and a hidden sampling canvas. Downsamples the media to grid resolution each frame so modes can call `bg.getLuma(col, row)` to bias rendering on background content. Exposes `get mediaElement()` and `get isVideo()` for use by `BackgroundFX`.
+Files inside `v2/` must be loaded in this order (enforced by `<script>` tags in `index.html`):
 
-**`background-fx.js` — `BackgroundFX`** — pixel-pipeline FX canvas layered between the raw media element and the p5 canvas (z-index 1). Five audio-reactive effects: posterize → warp → scanline corruption → chromatic aberration → beat flash. **Only active in Fusion mode (index 9)** — `sketch.js` calls `backgroundFX.update()` when mode is 9, `backgroundFX.hide()` otherwise. Uses plain Canvas 2D API only — no p5 globals. All params read from `FUSION_PARAMS.bgFx`.
+| # | File | Responsibility |
+|---|------|----------------|
+| 1 | `config.js` | Declares `V2_CONFIG`, `V2_PARAMS`, `V2_PARAM_RANGES` on `window` |
+| 2 | `audio.js` | `V2AudioManager` — Web Audio pipeline |
+| 3 | `ascii-art.js` | `AsciiArtLibrary` — static figure data |
+| 4 | `renderer.js` | `V2Renderer` — WebGL 2, glyph atlas, single draw call |
+| 5 | `fusion.js` | `V2FusionMode` — four-layer cell grid composer |
+| 6 | `background.js` | `V2BackgroundLayer` — CSS background image/video layer |
+| 7 | `bg-fx.js` | `BgFxManager` — audio-reactive CSS filter/transform on bg layer |
+| 8 | `bg-fx-panel.js` | `BgFxPanel` — DOM panel for live-tuning bg FX params |
+| 9 | `startup.js` | `V2StartupScreen` — terminal boot screen, audio source selection |
+| 10 | `hardware-bridge.js` | WebSocket listener, maps hardware param keys to `V2_PARAMS` |
+| 11 | `sketch.js` | Main loop, init, input handlers, status bar |
 
-**`modes/*.js`** — each mode is a class with:
-- `constructor(config)` — store reference, init state
-- `reset()` — called on grid resize or mode activation
-- `update(grid, cols, rows, audio, bg)` — called each frame; writes to grid via global `setCell(c, r, char, brightness)` and `setString(c, r, str, brightness)`
+Supporting assets: `fonts/`, `background_images/`, `shaders/` (reference copies of GLSL).
 
-Modes never draw to the p5 canvas directly — they only write characters and brightness values to the grid. `sketch.js` renders the grid each frame using phosphor color mapping.
+---
 
-**`modes/fusion.js` — `FusionMode`** — the production performance mode (index 9, key `[0]`). Four composited layers: FIGURE (ASCII art figures that decay and reseed), RAIN (matrix-style falling columns that interact with the figure), GLITCH (beat-triggered corruption bursts), BG (kick-driven opacity pulse + treble stutter + luma sampling). All tuning reads from `window.FUSION_PARAMS` (not static constants). Each layer has an enable toggle. Rendering order: figure → rain → burst.
+## Key global objects (all in `v2/config.js`)
 
-**`fusion-params.js`** — `window.FUSION_PARAMS` (live param store, plain object) and `window.FUSION_PARAM_RANGES` (min/max bounds for every driftable numeric param). Both are flat for the main layer params, with a nested `bgFx` sub-object for background FX params. This is the source of truth for all Fusion mode tuning — never read `FusionMode.STATIC_*` constants.
+**`window.V2_CONFIG`** — immutable runtime constants. Set once at startup; never mutated.
+Includes font settings, canvas dimensions, atlas layout (`ATLAS_COLS`), audio analysis
+parameters, phosphor preset definitions, and the CGA 16-color palette.
 
-**`fusion-panel.js`** — self-contained DOM panel (`#fusion-panel`) for live parameter editing. Opened/closed with Tab when Fusion mode is active. Exposes `window.toggleFusionPanel()`, `window.hideFusionPanel()`, and `window.syncFusionPanelState()`. `syncFusionPanelState()` updates all slider `.value` DOM properties and toggle button states — must be called after any automated param change. The document-level Tab listener calls `e.preventDefault()` only (to stop browser focus cycling) — `sketch.js` owns the actual toggle call.
+**`window.V2_PARAMS`** — live-tunable visual parameters. Written each frame by `fusion.js`
+for internal state (e.g. `_chromaBeatCurrent`). Also mutated by `hardware-bridge.js` in
+response to incoming WebSocket messages, and by key handlers in `sketch.js` in response
+to keyboard input. This is the single source of truth for all tunable visual state.
 
-**`fusion-automation.js` — `FusionAutomation`** — VJ automation for Fusion mode. Three sub-features: (1) 4-slot parameter snapshots persisted to `localStorage` (`fusionSnap_0..3`), cycled with `[,]`/`[.]` keys with auto-save on switch; (2) drift LFO that slowly oscillates numeric params within their ranges; (3) beat-synced morph that lerps toward random nearby targets every N beats. Boolean enable params are excluded from all automation. Instantiates itself as `window.fusionAutomation` on load. `sketch.js` calls `fusionAutomation.update(audioManager)` only when Fusion mode is active.
+**`window.V2_PARAM_RANGES`** — min/max bounds for every numeric param in `V2_PARAMS`.
+Used by `hardware-bridge.js` to clamp incoming hardware values before writing them.
 
-**`vj-sync.js` — `VJSyncManager`** — automates VJ controls in sync with beat detection (mode switching, phosphor cycling, scanline toggle, background pulse/stutter). Independent of Fusion mode — runs on all modes when enabled with `[V]`.
+Do not add new tunable parameters to `V2_PARAMS` without also adding a corresponding entry
+in `V2_PARAM_RANGES`.
 
-## Key constraints
+---
 
-**AudioContext unlock**: `ctx.resume()` must be called synchronously inside a user gesture (click, file input change). Calling it inside an async callback (like `p5.SoundFile`'s success callback) is outside the gesture window and may not unlock audio. The primary resume call is in `_loadAudioFileFromObject()` in `sketch.js`, before the async `audioManager.loadAudioFile()` call.
+## Module responsibilities
 
-**`getAudioContext()`**: p5.sound global — always guard with `typeof getAudioContext === 'function'` before calling. It is not present in all contexts.
+### `renderer.js` — V2Renderer
 
-**p5.FFT wiring**: `p5.FFT` without `setInput()` analyzes the p5.sound master output. Do NOT call `fft.setInput(soundFile)` — it disconnects the source from master output and breaks analysis.
+WebGL 2 renderer. Builds a glyph atlas (a single texture containing every character in the
+charset, rendered at startup with the configured font). On each frame, accepts three typed
+arrays from `fusion.js` (char index, brightness, CGA color index) and uploads them as a
+pair of data textures. Issues a single `gl.drawArrays()` call over a full-screen quad.
 
-**Instance mode**: p5 globals (`width`, `height`, `textWidth`, etc.) are only available as `p.*` inside `sketch.js`. All other files must not use bare p5 globals — `background-fx.js` and `fusion-automation.js` use plain JS only.
+The fragment shader looks up each cell's character from the atlas, applies chromatic
+aberration (per-channel horizontal offsets), maps brightness to a three-stop phosphor color
+or a CGA palette entry, and applies the scanline effect.
 
-**Phosphor rendering**: brightness values in grid cells (0–1) map to three color stops (`dim` / `mid` / `bright`) from `CONFIG.PHOSPHORS[currentPhosphor]`. Thresholds: `> 0.66` → bright, `> 0.33` → mid, else dim.
+Shader precision: `highp float` in both vertex and fragment stages.
 
-**`FUSION_PARAMS` param store**: `fusion-params.js` must load before `background-fx.js` and all mode files. `background-fx.js` reads `FUSION_PARAMS.bgFx` inside `update()` at runtime (not at construction time) so a missing reference at load time is safe, but the load order must still be respected to avoid maintenance traps.
+### `fusion.js` — V2FusionMode
 
-**`BackgroundFX` scope**: `background-fx.js` is only active in Fusion mode. `sketch.js` guards the update call with `currentModeIndex === 9`. Do not call `backgroundFX.update()` unconditionally — it will apply pixel effects to all modes.
+Maintains four composited layers, all written into flat typed arrays each frame:
 
-**`syncFusionPanelState()`**: must be called after any code that writes to `FUSION_PARAMS` programmatically (automation, snapshot load) so sliders and toggle buttons stay in sync with actual values. `FusionAutomation.update()` calls it automatically on frames where it changes params.
+- **figure** — ascii-art stamp that fades over time and re-seeds periodically
+- **rain** — per-column falling character streams (matrix rain style), audio-reactive speed
+- **wave** — sine-field interference pattern using katakana characters
+- **glitch** — beat-triggered scatter, pulse waves, hex dump seeds
 
-## Keyboard shortcuts (Fusion mode extras)
+Output: `Uint16Array charIdx`, `Uint16Array bright16`, `Uint8Array cgaIdx` — passed directly
+to `renderer.upload()` each frame. No heap allocations during steady-state rendering.
+
+Character-to-atlas-index lookup is via `_charMap` (a `Map` built once from the charset array).
+Missing characters emit a `console.warn` once per unique missing char.
+
+### `audio.js` — V2AudioManager
+
+Manages the Web Audio API graph. No p5.sound, no external dependencies. Four source modes:
+
+- `idle` — all data zeroed, no graph active
+- `demo` — procedural CPU synthesizer + oscillator graph; self-sufficient (calls `resume()`
+  internally if the AudioContext has not been created yet)
+- `file` — `<audio>` element via `MediaElementSourceNode`; loaded via blob URL
+- `live` — microphone via `MediaStreamSourceNode` and `getUserMedia`
+
+`AudioContext` is created lazily on the first call to `resume()`, which must come from a
+user-gesture handler. On kiosk Pi deployments, `--autoplay-policy=no-user-gesture-required`
+removes this requirement.
+
+### `background.js` — V2BackgroundLayer
+
+Manages a CSS `background-image` on the fixed `#v2-bg-image` div. Handles loading from a
+local file (image or video). Provides `resample()` which samples the current background into
+a luma array for use by `fusion.js` (background-influenced cell brightness).
+
+### `bg-fx.js` — BgFxManager
+
+Applies audio-reactive CSS `filter` and `transform` to `#v2-bg-image` each frame. Envelopes
+for beat flash, invert flash, and scale pulse decay multiplicatively between frames. The GPU
+compositor handles these properties — no pixel readback occurs at any point.
+
+### `bg-fx-panel.js` — BgFxPanel
+
+A DOM panel (`#bg-fx-panel`) constructed entirely in JavaScript. Provides sliders for all
+`bgFx*` and `bgOpacity` params. Toggle with the Tab key. `syncState()` can be called by
+external code to push updated `V2_PARAMS` values back into the slider controls.
+
+### `startup.js` — V2StartupScreen
+
+Terminal-style boot animation displayed before the main loop starts. Blocks `init()` until
+the user selects an audio source (demo / file / live) or the 8-second kiosk timer fires.
+
+### `hardware-bridge.js`
+
+Opens a WebSocket connection to a companion server running on the Pi hardware. Receives
+JSON messages mapping hardware knob/button IDs to `V2_PARAMS` keys, clamps values using
+`V2_PARAM_RANGES`, and writes them into `V2_PARAMS`. The main loop in `sketch.js` picks up
+changes automatically on the next frame.
+
+### `sketch.js`
+
+Top-level IIFE. Orchestrates startup (font load, atlas build, audio init, background load,
+startup screen, input wiring) and runs the `requestAnimationFrame` loop gated at
+`V2_CONFIG.TARGET_FPS` (default 30). Owns the keyboard input handlers and the status bar.
+
+---
+
+## Key bindings
 
 | Key | Action |
 |-----|--------|
-| `[0]` button | Switch to Fusion mode |
-| Tab | Open/close the Fusion params panel (when Fusion is active) |
-| `,` | Previous snapshot slot (auto-saves current slot first) |
-| `.` | Next snapshot slot (auto-saves current slot first) |
+| D | Toggle demo mode on/off |
+| A | Open audio file picker |
+| B | Toggle background image visibility |
+| X | Toggle audio-reactive bg FX (filter/transform) |
+| S | Cycle scanline mode: OFF → PIXEL → CELL-GAP → SMOOTH → OFF |
+| P | Cycle phosphor preset (green → amber → blue → red → white → ...) |
+| L | Load background image or video from file |
+| F | Toggle fullscreen |
+| Tab | Toggle bg FX panel (when panel is open, Tab moves focus between controls) |
+| Esc | Close bg FX panel if open; exit fullscreen otherwise |
+| ` (backtick) | Show glyph atlas debug overlay (requires `#debug-atlas` in URL hash) |
+| ~ (tilde) | Toggle FPS / frame-time performance overlay |
 
-## Adding a new mode
+---
 
-1. Create `modes/yourmode.js` — class with `constructor(config)`, `reset()`, `update(grid, cols, rows, audio, bg)`
-2. Add `<script src="modes/yourmode.js"></script>` in `index.html` (before `fusion-panel.js`)
-3. Add a button in `#mode-buttons` in `index.html`
-4. Push `new YourMode(CONFIG)` in `p.setup` in `sketch.js` (order = button index)
-5. Add mode name to `modeNames` array in `updateStatusBar()` in `sketch.js`
-6. Add mode index to `CONFIG.VJ_SYNC.MODE_LIST` in `config.js` if it should be eligible for VJ sync auto-switching
+## Phosphor presets and scanline modes
+
+Phosphor presets are defined in `V2_CONFIG.PHOSPHORS` and ordered by `V2_CONFIG.PHOSPHOR_ORDER`.
+Each preset defines three `[r,g,b]` stops (`dim`, `mid`, `bright`) that the fragment shader
+blends between based on per-cell brightness.
+
+Scanline modes (controlled by `V2_PARAMS.scanlineMode`, valid range 0–3):
+
+| Value | Name | Effect |
+|-------|------|--------|
+| 0 | OFF | No scanline darkening |
+| 1 | PIXEL | Every other display pixel row darkened |
+| 2 | CELL-GAP | Bottom ~20% of each character cell darkened |
+| 3 | SMOOTH | Sine-based phosphor beam falloff within each cell row |
+
+---
+
+## Common pitfalls for agents and contributors
+
+- There is no p5.js. Do not add it. Do not reference `p`, `p5`, `sketch`, `draw()`, `setup()`.
+- There is no `modes/` directory.
+- There is no `FUSION_PARAMS` or `fusion-params.js`. Params live in `window.V2_PARAMS` (config.js).
+- There is no `setCell()` global. Cell data is written directly into typed arrays in `fusion.js`.
+- `V2_CONFIG` is immutable. Do not assign to its properties at runtime.
+- `V2_PARAMS` is the only object you should mutate to change visual behavior at runtime.
+- The charset (glyph atlas) is built once at startup from `buildCharset()` in `sketch.js`.
+  Any Unicode character not in the charset will silently render as a blank cell. A dev-mode
+  warning is emitted at startup for any ascii-art figure characters absent from the charset.
+- `pi/` is being rewritten. Do not document or rely on its current contents.
+
+---
+
+## Dev workflow
+
+```sh
+cd v2
+python3 -m http.server 8080
+```
+
+Open `http://localhost:8080` in Chrome or Chromium.
+
+There is no build step, no bundler, no `package.json`, no test runner. All files are plain
+static JS and HTML served directly.
+
+To inspect the glyph atlas, open the page with the URL hash `#debug-atlas`, then run
+`renderer.debugAtlas()` in the browser DevTools console. A click-to-dismiss atlas image
+will appear in the top-left corner.

@@ -33,7 +33,7 @@ window.V2_CONFIG = {
   MORPH_HEIGHT: 20,
 
   // Glyph atlas layout
-  // 20 columns × 14 rows = 280 slots — enough for the full charset (~275 chars)
+  // 20 columns × ~22 rows = ~440 slots — covers ~423 chars after box-drawing + symbolic expansion
   ATLAS_COLS: 20,             // characters per row in glyph atlas
 
   // Audio analysis
@@ -175,7 +175,7 @@ window.V2_PARAM_RANGES = {
   phosphorIndex:     { min: 0,     max: 4    },
 
   scanlineIntensity: { min: 0,     max: 1.0  },
-  scanlineMode:      { min: 0,     max: 1    },
+  scanlineMode:      { min: 0,     max: 3    },
   chromaBase:        { min: 0,     max: 8.0  },
   chromaBeat:        { min: 0,     max: 12.0 },
 

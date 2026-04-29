@@ -87,11 +87,11 @@ class BgFxManager {
     this._el.style.filter =
       `${blurPart}brightness(${bright.toFixed(2)}) saturate(${sat.toFixed(2)}) hue-rotate(${hue.toFixed(1)}deg) contrast(${contrast.toFixed(2)})${sepiaPart}${grayscalePart}${invertPart}`;
 
-    // Scale pulse — only write transform when the envelope is non-negligible
+    // Scale pulse — always write transform so the property clears when the envelope decays
     const scalePulse = this._scalePulseCurrent;
-    if (scalePulse > 0.001) {
-      this._el.style.transform = `scale(${(1 + scalePulse).toFixed(4)})`;
-    }
+    this._el.style.transform = scalePulse > 0.001
+      ? `scale(${(1 + scalePulse).toFixed(4)})`
+      : '';
   }
 
   /**

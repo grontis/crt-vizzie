@@ -14,6 +14,17 @@
 
 'use strict';
 
+const _warnedMissingChars = new Set();
+
+function _charIdxOrWarn(charMap, ch) {
+  if (charMap.has(ch)) return charMap.get(ch);
+  if (!_warnedMissingChars.has(ch)) {
+    _warnedMissingChars.add(ch);
+    console.warn('[fusion] char not in atlas:', JSON.stringify(ch));
+  }
+  return 0;
+}
+
 class V2FusionMode {
 
   static GLI_CHARS = '!@#$%^&*[]{}|\\/<>?~`+=-_░▒▓█▄▀■□▪▫◘◙◄►▲▼◆◇○●';
@@ -585,7 +596,7 @@ class V2FusionMode {
         const ch = frame[r][c];
         if (ch !== ' ') {
           const idx = gr * cols + gc;
-          this._figureChar[idx]   = this._charMap.get(ch) || 0;
+          this._figureChar[idx]   = _charIdxOrWarn(this._charMap, ch);
           this._figureBright[idx] = p.figBrightness;
         }
       }
@@ -658,7 +669,7 @@ class V2FusionMode {
         if (gr >= 0 && gr < rows && gc >= 0 && gc < cols) {
           const idx = gr * cols + gc;
           const ch  = frame[r][c];
-          this._glitchChar[idx]   = this._charMap.get(ch) || 0;
+          this._glitchChar[idx]   = _charIdxOrWarn(this._charMap, ch);
           this._glitchCgaIdx[idx] = Math.floor(Math.random() * 16);
           this._glitchBright[idx] = ch === ' ' ? 0 : 0.8;
         }
