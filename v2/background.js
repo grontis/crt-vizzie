@@ -37,7 +37,8 @@ class V2BackgroundLayer {
   /**
    * Load a background image or video from a server URL (no object URL needed).
    * Revokes any existing object URL from a prior loadFromFile call.
-   * Extension sniffing: .mp4 / .webm / .mov -> video; everything else -> image.
+   * Extension sniffing: .mp4 / .webm / .mov / .mkv / .m4v -> video; everything else -> image.
+   * Whether a video actually plays depends on the codec inside the container.
    * @param {string} url
    * @returns {Promise<void>}
    */
@@ -48,7 +49,7 @@ class V2BackgroundLayer {
     }
     this._loaded = false;
     const ext = url.split('?')[0].split('.').pop().toLowerCase();
-    if (ext === 'mp4' || ext === 'webm' || ext === 'mov') {
+    if (ext === 'mp4' || ext === 'webm' || ext === 'mov' || ext === 'mkv' || ext === 'm4v') {
       return this._loadVideo(url);
     }
     return this._loadImage(url);
@@ -92,11 +93,22 @@ class V2BackgroundLayer {
    * @param {number} rows
    */
   resample(cols, rows) {
-    if (!this._loaded || !this._source) return;
     if (cols <= 0 || rows <= 0) return;
 
+    // Cache dimensions even when no source is loaded yet, so an async load
+    // completing later can self-resample using the stored cols/rows.
+    const dimsChanged = (cols !== this._cols) || (rows !== this._rows);
     this._cols = cols;
     this._rows = rows;
+
+    // Pre-allocate the luma buffer on dimension change. _drawSource() reuses
+    // it every frame to avoid per-frame GC churn (matters on Pi).
+    if (dimsChanged || this._lumaData.length !== cols * rows) {
+      this._lumaData = new Float32Array(cols * rows);
+    }
+
+    if (!this._loaded || !this._source) return;
+
     this._canvas.width  = cols;
     this._canvas.height = rows;
 
@@ -150,7 +162,23 @@ class V2BackgroundLayer {
       video.playsInline = true;
       video.autoplay   = true;
 
+      // Both listeners share an AbortController so whichever fires first
+      // removes the other. Without this the unused listener stays attached
+      // and fires later when _stopVideo() sets src='' on cleanup, producing
+      // a spurious "Empty src attribute" error log for an already-loaded video.
+      const ac = new AbortController();
+
       video.addEventListener('canplay', () => {
+        ac.abort();
+        // Chromium can fire canplay for files where it demuxed the container
+        // and decoded audio but couldn't decode the video stream (e.g. HEVC,
+        // some AV1 builds). videoWidth/Height stay at 0 in that case. Treat
+        // it as a load failure so the playlist skips to the next entry.
+        if (video.videoWidth === 0 || video.videoHeight === 0) {
+          console.warn('[V2BackgroundLayer] Video stream not decodable (likely unsupported codec):', src);
+          resolve();
+          return;
+        }
         this._video   = video;
         this._source  = video;
         this._isVideo = true;
@@ -159,12 +187,19 @@ class V2BackgroundLayer {
         this._updateVisibleEl(video, null);
         if (this._cols > 0 && this._rows > 0) this.resample(this._cols, this._rows);
         resolve();
-      }, { once: true });
+      }, { signal: ac.signal });
 
       video.addEventListener('error', () => {
-        console.warn('[V2BackgroundLayer] Failed to load video file');
+        ac.abort();
+        const err = video.error;
+        // MediaError codes: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
+        const codeName = err
+          ? ({ 1: 'ABORTED', 2: 'NETWORK', 3: 'DECODE', 4: 'SRC_NOT_SUPPORTED' }[err.code] || `code=${err.code}`)
+          : 'unknown';
+        console.warn(`[V2BackgroundLayer] Failed to load video file (${codeName})`,
+          err && err.message ? err.message : '', src);
         resolve();
-      }, { once: true });
+      }, { signal: ac.signal });
     });
   }
 
@@ -204,14 +239,15 @@ class V2BackgroundLayer {
 
     const imageData = this._ctx2d.getImageData(0, 0, this._cols, this._rows);
     const data      = imageData.data;
+    const luma      = this._lumaData; // reused buffer; resample() owns its size
+    const n         = this._cols * this._rows;
 
-    this._lumaData = new Float32Array(this._cols * this._rows);
-    for (let i = 0; i < this._cols * this._rows; i++) {
+    for (let i = 0; i < n; i++) {
       const r = data[i * 4];
       const g = data[i * 4 + 1];
       const b = data[i * 4 + 2];
       // BT.601 luma coefficients, normalized to [0, 1]
-      this._lumaData[i] = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+      luma[i] = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
     }
   }
 

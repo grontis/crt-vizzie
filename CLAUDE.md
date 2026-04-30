@@ -32,15 +32,16 @@ Files inside `v2/` must be loaded in this order (enforced by `<script>` tags in 
 | 4 | `renderer.js` | `V2Renderer` — WebGL 2, glyph atlas, single draw call |
 | 5 | `fusion.js` | `V2FusionMode` — four-layer cell grid composer |
 | 6 | `background.js` | `V2BackgroundLayer` — CSS background image/video layer |
-| 7 | `bg-fx.js` | `BgFxManager` — audio-reactive CSS filter/transform on bg layer |
-| 8 | `bg-fx-panel.js` | `BgFxPanel` — DOM panel for live-tuning bg FX params |
-| 9 | `startup.js` | `V2StartupScreen` — terminal boot screen, audio source selection |
-| 10 | `hardware-bridge.js` | WebSocket listener, maps hardware param keys to `V2_PARAMS` |
-| 11 | `sketch.js` | Main loop, init, input handlers, status bar |
+| 7 | `bg-folder.js` | `V2BgFolder` — File System Access API + IndexedDB-persisted directory handle for streaming local bg media |
+| 8 | `bg-fx.js` | `BgFxManager` — audio-reactive CSS filter/transform on bg layer |
+| 9 | `bg-fx-panel.js` | `BgFxPanel` — DOM panel for live-tuning bg FX params |
+| 10 | `startup.js` | `V2StartupScreen` — terminal boot screen, audio source selection |
+| 11 | `hardware-bridge.js` | WebSocket listener, maps hardware param keys to `V2_PARAMS` |
+| 12 | `sketch.js` | Main loop, init, input handlers, status bar |
 
 Supporting assets: `fonts/`, `shaders/` (reference copies of GLSL).
 
-`v2/bg-media/` — gitignored directory for user-supplied background images and videos. Contains `gen-manifest.py` and `.gitkeep` (both tracked). Populate with media files and run `gen-manifest.py` to produce `manifest.json` for the cycle feature.
+`v2/bg-media/` — gitignored directory the user typically points the bg-folder picker at. Only `.gitkeep` is tracked; media files live there but are not committed. There is no manifest file — the file list is enumerated live via the FS Access API directory handle.
 
 ---
 
@@ -60,11 +61,6 @@ Used by `hardware-bridge.js` to clamp incoming hardware values before writing th
 
 Do not add new tunable parameters to `V2_PARAMS` without also adding a corresponding entry
 in `V2_PARAM_RANGES`.
-
-**`V2_CONFIG.BG_MEDIA_FOLDER`** — string path (relative to `v2/`) for the background media
-directory. Default: `'bg-media'`. The app fetches `${BG_MEDIA_FOLDER}/manifest.json` on
-startup and auto-loads the first entry. Arrow keys cycle through the playlist. Set to `''`
-or `null` to disable the feature.
 
 ---
 
@@ -119,6 +115,36 @@ server URL (`loadFromUrl(url)`) or a local file (`loadFromFile(file)`). Provides
 which samples the current background into a luma array for use by `fusion.js`
 (background-influenced cell brightness).
 
+The `_lumaData` Float32Array is pre-allocated by `resample()` and reused every frame in
+`_drawSource()` to avoid per-frame GC churn (matters on Pi).
+
+### `bg-folder.js` — V2BgFolder
+
+Owns the playlist of background media files. Uses the **File System Access API**
+(`window.showDirectoryPicker`) to acquire a `FileSystemDirectoryHandle` for a user-chosen
+folder; the handle is persisted in IndexedDB (`crt-vizzie-bg`/`handles`/`dirHandle`) so
+subsequent boots can restore it silently.
+
+Three permission entry points:
+
+- `tryRestoreSilent()` — reads handle from IDB, calls `queryPermission()`. Returns true
+  only if permission is still `'granted'`. Never prompts. Sketch.js calls this in `init()`.
+- `requestPermissionAndScan()` — asks the browser to upgrade a stored handle's permission
+  back to `'granted'`. Must be invoked from a user gesture. Sketch.js calls this right
+  after `applyChoice()` if `bgFolder.hasPendingHandle` is true (i.e. the handle exists
+  but lapsed to `'prompt'`).
+- `pickFolder()` — invokes `showDirectoryPicker()`. Used by the M key binding.
+
+Each `getFile(idx)` returns a fresh `File` reference for the entry. The video element
+streams from disk via the OS file handle — bytes are read on demand, never buffered into
+memory. This is the same code path the L key uses, just over a whole directory.
+
+Supported extensions: `jpg`, `jpeg`, `png`, `gif`, `webp`, `mp4`, `webm`, `mov`, `mkv`, `m4v`.
+
+Browser support: Chromium-based browsers only. Firefox does not implement
+`showDirectoryPicker` at this time. Use the L key to load individual files in unsupported
+browsers.
+
 ### `bg-fx.js` — BgFxManager
 
 Applies audio-reactive CSS `filter` and `transform` to `#v2-bg-image` each frame. Envelopes
@@ -161,8 +187,9 @@ startup screen, input wiring) and runs the `requestAnimationFrame` loop gated at
 | X | Toggle audio-reactive bg FX (filter/transform) |
 | S | Cycle scanline mode: OFF → PIXEL → CELL-GAP → SMOOTH → OFF |
 | P | Cycle phosphor preset (green → amber → blue → red → white → ...) |
-| L | Load background image or video from file |
-| ArrowLeft / ArrowRight | Cycle backward/forward through the bg-media playlist (wrap-around) |
+| L | Load a single background image or video from file (one-off, off-playlist) |
+| M | Pick / re-pick the bg-media folder (FS Access API directory picker) |
+| ArrowLeft / ArrowRight | Cycle backward/forward through the bg-folder playlist (wrap-around) |
 | F | Toggle fullscreen |
 | Tab | Toggle bg FX panel (when panel is open, Tab moves focus between controls) |
 | Esc | Close bg FX panel if open; exit fullscreen otherwise |
@@ -199,6 +226,11 @@ Scanline modes (controlled by `V2_PARAMS.scanlineMode`, valid range 0–3):
 - The charset (glyph atlas) is built once at startup from `buildCharset()` in `sketch.js`.
   Any Unicode character not in the charset will silently render as a blank cell. A dev-mode
   warning is emitted at startup for any ascii-art figure characters absent from the charset.
+- There is no `manifest.json`, no `gen-manifest.py`, and no `BG_MEDIA_FOLDER` config key.
+  The bg playlist comes from a `FileSystemDirectoryHandle` via `bg-folder.js`. Do not
+  reintroduce a manifest fetch — large/4K media played via HTTP without Range support
+  thrashes the dev server and stutters audio/FPS, which is exactly why the FS Access
+  API path replaced it.
 - `pi/` is being rewritten. Do not document or rely on its current contents.
 
 ---

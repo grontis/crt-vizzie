@@ -22,11 +22,11 @@
   let audioManager = null;
   let fusionMode   = null;
   let bgLayer      = null;
+  let bgFolder     = null;     // V2BgFolder — granted directory handle + entries
   let bgFx         = null;
   let bgFxPanel    = null;
 
-  let _bgPlaylist       = [];   // string[] of resolved URL paths from manifest
-  let _bgIndex          = -1;   // current playlist position; -1 = no manifest / off-playlist
+  let _bgIndex          = -1;   // current entry index in bgFolder; -1 = off-playlist (manual file load)
   let _statusFlashTimer = null; // setTimeout handle for transient status flash
 
   let _audioContextResumed = false;
@@ -148,10 +148,21 @@
     window.audioManager = audioManager; // exposed for hardware-bridge.js
     window.renderer     = renderer;     // exposed for console debug (renderer.debugAtlas())
 
-    // 4. Background layer — load image before startup screen so it is
-    //    ready to resample immediately after the user makes a selection.
-    bgLayer = new V2BackgroundLayer();
-    await loadBgManifest();
+    // 4. Background layer + bg folder.
+    //    Try to silently restore a previously granted FileSystemDirectoryHandle
+    //    from IndexedDB. On success we kick off loading the first entry but
+    //    DO NOT await it — a large/slow first file (e.g. a 4K video) would
+    //    otherwise block the startup screen for many seconds. The bg layer
+    //    self-resamples once the async load completes.
+    //    On first run (no stored handle) the user picks a folder via the
+    //    M key from the main app.
+    bgLayer  = new V2BackgroundLayer();
+    bgFolder = new V2BgFolder();
+    window.bgLayer  = bgLayer;   // exposed for console debugging
+    window.bgFolder = bgFolder;
+    if (await bgFolder.tryRestoreSilent()) {
+      tryShowBgEntry(0, +1);
+    }
     bgFx = new BgFxManager();
     bgFxPanel = new BgFxPanel();
 
@@ -179,6 +190,16 @@
     // 6. Apply audio source choice (calls audioManager.resume() — valid because
     //    the startup screen interaction counts as a user gesture on non-kiosk paths)
     await applyChoice(choice);
+
+    // 6b. Bg folder permission upgrade. If we have a handle on disk but its
+    //     permission lapsed to 'prompt' (typical after a browser restart),
+    //     piggyback on the startup-screen click as a user gesture to ask for
+    //     it back. No-op when silent restore already succeeded.
+    if (bgFolder.hasPendingHandle) {
+      if (await bgFolder.requestPermissionAndScan()) {
+        tryShowBgEntry(0, +1);
+      }
+    }
 
     // 7. Resample background image to current grid dimensions, then init fusion mode
     bgLayer.resample(renderer.cols, renderer.rows);
@@ -230,70 +251,73 @@
     _audioContextResumed = true;
   }
 
-  // ── Background media manifest ─────────────────────────────────────────────
+  // ── Background folder cycling ─────────────────────────────────────────────
 
-  async function loadBgManifest() {
-    const folder = V2_CONFIG.BG_MEDIA_FOLDER;
-    if (!folder) return;
+  /**
+   * Try to load+show the bg-folder entry at startIdx, advancing by `delta`
+   * on each failure until an entry loads or every entry has been tried.
+   * Reads files via FileSystemFileHandle so the video element streams from
+   * disk on demand — no full-file download/buffering.
+   */
+  async function tryShowBgEntry(startIdx, delta) {
+    const len = bgFolder.count;
+    if (len === 0) return false;
 
-    let entries;
-    try {
-      const res = await fetch(`${folder}/manifest.json`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      entries = await res.json();
-    } catch (e) {
-      console.warn('[sketch] bg manifest fetch failed — bg layer will be empty:', e.message);
-      return;
-    }
+    let idx = ((startIdx % len) + len) % len;
+    for (let attempts = 0; attempts < len; attempts++) {
+      const filename = bgFolder.nameAt(idx);
+      const file = await bgFolder.getFile(idx);
 
-    if (!Array.isArray(entries) || entries.length === 0) {
-      console.warn('[sketch] bg manifest is empty or invalid — bg layer will be empty');
-      return;
-    }
-
-    _bgPlaylist = entries.map(f => `${folder}/${f}`);
-    _bgIndex = 0;
-    await bgLayer.loadFromUrl(_bgPlaylist[0]);
-    if (!bgLayer.isLoaded) {
-      console.warn('[sketch] First manifest entry failed to load — bg layer empty');
-      _bgIndex = -1;
-      _bgPlaylist = [];
-    }
-  }
-
-  async function cycleBgMedia(delta) {
-    if (_bgPlaylist.length === 0) {
-      flashStatus('[NO MANIFEST]', true);
-      return;
-    }
-
-    const len = _bgPlaylist.length;
-    let attempts = 0;
-
-    do {
-      _bgIndex = ((_bgIndex + delta) % len + len) % len;
-      attempts++;
-      const url = _bgPlaylist[_bgIndex];
-      const filename = url.split('/').pop();
-      await bgLayer.loadFromUrl(url);
-
-      if (bgLayer.isLoaded) {
-        bgLayer.resample(renderer.cols, renderer.rows);
-        if (!V2_PARAMS.bgEnabled) {
-          V2_PARAMS.bgEnabled = true;
-          const bgEl = document.getElementById('v2-bg-image');
-          if (bgEl) bgEl.classList.add('visible');
+      if (file) {
+        await bgLayer.loadFromFile(file);
+        if (bgLayer.isLoaded) {
+          _bgIndex = idx;
+          bgLayer.resample(renderer.cols, renderer.rows);
+          if (!V2_PARAMS.bgEnabled) {
+            V2_PARAMS.bgEnabled = true;
+            const bgEl = document.getElementById('v2-bg-image');
+            if (bgEl) bgEl.classList.add('visible');
+          }
+          flashStatus(`bg: ${filename}`, false);
+          return true;
         }
-        flashStatus(`bg: ${filename}`, false);
-        return;
       }
 
       flashStatus(`[ERR] ${filename}`, true);
-      if (attempts < len) await new Promise(r => setTimeout(r, 600));
-
-    } while (attempts < len);
+      idx = ((idx + delta) % len + len) % len;
+    }
 
     flashStatus('[ERR] all bg entries failed', true);
+    return false;
+  }
+
+  async function cycleBgMedia(delta) {
+    if (bgFolder.count === 0) {
+      flashStatus('[NO BG FOLDER — press M]', true);
+      return;
+    }
+    const len = bgFolder.count;
+    const startIdx = ((_bgIndex + delta) % len + len) % len;
+    await tryShowBgEntry(startIdx, delta);
+  }
+
+  /**
+   * Prompt the user to pick a bg-media folder via the FS Access API, persist
+   * the granted handle, and load the first entry. Must be called from a user
+   * gesture (key/click handler).
+   */
+  async function pickBgFolder() {
+    if (!V2BgFolder.isSupported()) {
+      flashStatus('[FS API NOT SUPPORTED]', true);
+      return;
+    }
+    const ok = await bgFolder.pickFolder();
+    if (!ok) return; // user cancelled
+    if (bgFolder.count === 0) {
+      flashStatus('[NO MEDIA IN FOLDER]', true);
+      return;
+    }
+    await tryShowBgEntry(0, +1);
   }
 
   // ── Main loop ──────────────────────────────────────────────────────────────
@@ -440,6 +464,11 @@
         case 'L':
           // Load background image or video from file
           triggerBgFilePicker();
+          break;
+
+        case 'M':
+          // Pick / re-pick the bg-media folder via FS Access API
+          pickBgFolder();
           break;
 
         case 'ESCAPE':
@@ -602,7 +631,7 @@
       _statusInfoEl.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | bgfx:${bgFxState} | ${glInfo}`;
     }
     if (_statusHelpEl) {
-      _statusHelpEl.textContent = ' | B=bg X=bgfx S=scanline P=phosphor L=load-bg ←/→=cycle-bg F=full';
+      _statusHelpEl.textContent = ' | B=bg X=bgfx S=scanline P=phosphor L=load-bg M=bg-folder ←/→=cycle-bg F=full';
     }
   }
 

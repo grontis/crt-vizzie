@@ -36,9 +36,6 @@ window.V2_CONFIG = {
   // 20 columns × ~22 rows = ~440 slots — covers ~423 chars after box-drawing + symbolic expansion
   ATLAS_COLS: 20,             // characters per row in glyph atlas
 
-  // Background media folder (relative to v2/; must contain manifest.json)
-  BG_MEDIA_FOLDER: 'bg-media',
-
   // Audio analysis
   FFT_SIZE:        1024,
   FFT_SMOOTHING:   0.65,
@@ -152,16 +149,16 @@ window.V2_PARAMS = {
 
   // BG (background image) layer
   bgEnabled:       true,
-  bgOpacity:       0.70,
+  bgOpacity:       0.65,
   bgLumaThreshold: 0.30,
-  bgStutterAmp:    0.04,
+  bgStutterAmp:    0.1,
 
   // BG FX (audio-reactive CSS filters on the bg layer)
   bgFxEnabled:    true,
-  bgFxHueShift:   40.0,
+  bgFxHueShift:   150.0,
   bgFxSaturation: 2.0,
-  bgFxBrightness: 0.2,
-  bgFxContrast:   0.2,
+  bgFxBrightness: 1.0,
+  bgFxContrast:   0.25,
   bgFxBlur:       1.0,
   bgFxInvert:     0.0,
   bgFxScalePulse: 0.0,
