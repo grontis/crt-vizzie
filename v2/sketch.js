@@ -160,6 +160,7 @@
     bgFolder = new V2BgFolder();
     window.bgLayer  = bgLayer;   // exposed for console debugging
     window.bgFolder = bgFolder;
+    bgLayer.onVideoEnded = () => cycleBgMedia(+1);
     if (await bgFolder.tryRestoreSilent()) {
       tryShowBgEntry(0, +1);
     }

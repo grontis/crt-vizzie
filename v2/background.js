@@ -28,6 +28,7 @@ class V2BackgroundLayer {
     this._loaded   = false;
     this._isVideo  = false;
     this._objURL   = null;   // current object URL — revoked on next load
+    this.onVideoEnded = null; // optional callback — set by sketch.js to advance playlist
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -157,7 +158,6 @@ class V2BackgroundLayer {
     return new Promise((resolve) => {
       const video = document.createElement('video');
       video.src        = src;
-      video.loop       = true;
       video.muted      = true;
       video.playsInline = true;
       video.autoplay   = true;
@@ -184,6 +184,9 @@ class V2BackgroundLayer {
         this._isVideo = true;
         this._loaded  = true;
         video.play().catch(() => {});
+        video.addEventListener('ended', () => {
+          if (this.onVideoEnded) this.onVideoEnded();
+        });
         this._updateVisibleEl(video, null);
         if (this._cols > 0 && this._rows > 0) this.resample(this._cols, this._rows);
         resolve();

@@ -177,7 +177,10 @@ class V2BgFolder {
       this._entries = [];
       return;
     }
-    out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
     this._entries = out;
   }
 
