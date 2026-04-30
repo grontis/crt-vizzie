@@ -163,7 +163,7 @@ window.V2_PARAMS = {
   bgFxHueShift:   35.0,
   bgFxSaturation: 1.1,
   bgFxBrightness: 1.0,
-  bgFxContrast:   0.25,
+  bgFxContrast:   0.11,
   bgFxBlur:       1.0,
   bgFxInvert:     0.0,
   bgFxScalePulse: 0.0,
