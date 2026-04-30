@@ -62,6 +62,14 @@ window.V2_CONFIG = {
   },
   PHOSPHOR_ORDER: ['green', 'amber', 'blue', 'red', 'white'],
 
+  // ASCII density ramps (lightest to darkest visual weight)
+  // Used by the bgAscii layer in fusion.js to map background luma to characters.
+  ASCII_DENSITY_RAMPS: [
+    ' .\'`^",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$', // 0: full 70-char ramp
+    ' .:-=+*#%@',                                                                 // 1: minimal 10-char ramp
+    ' ░▒▓█',                                                  // 2: block shading ramp (░▒▓█)
+  ],
+
   // CGA 16-color palette as [r,g,b] 0–1 floats
   // Index 0 = black (used as "no CGA override — use phosphor")
   CGA_COLORS: [
@@ -154,7 +162,7 @@ window.V2_PARAMS = {
 
   // BG (background image) layer
   bgEnabled:       true,
-  bgOpacity:       0.65,
+  bgOpacity:       0.55,
   bgLumaThreshold: 0.30,
   bgStutterAmp:    0.1,
 
@@ -166,9 +174,17 @@ window.V2_PARAMS = {
   bgFxContrast:   0.11,
   bgFxBlur:       1.0,
   bgFxInvert:     0.0,
-  bgFxScalePulse: 0.15,
+  bgFxScalePulse: 0.0,
   bgFxSepia:      0.0,
   bgFxGrayscale:  0.0,
+
+  // ASCII art layer (bgAscii) — V key toggles
+  bgAsciiEnabled:    false, // bool: layer on/off
+  bgAsciiLevel:      0.7,   // float [0..1]: overall blend/brightness (static knob)
+  _bgAsciiAudioAdd:  0.0,   // float: audio-reactive add (written by sketch.js each frame)
+  bgAsciiAudioMult:  0.5,   // float [0..1]: how strongly audio drives brightness boost
+  bgAsciiInvert:     false, // bool: invert luma→ramp mapping (for dark-bg media)
+  bgAsciiRampPreset: 0,     // int [0..2]: density ramp selector
 
 };
 
@@ -234,5 +250,10 @@ window.V2_PARAM_RANGES = {
   bgFxScalePulse:  { min: 0,   max: 0.3   },
   bgFxSepia:       { min: 0,   max: 1.0   },
   bgFxGrayscale:   { min: 0,   max: 1.0   },
+
+  // ASCII art layer
+  bgAsciiLevel:      { min: 0, max: 1.0 },
+  bgAsciiAudioMult:  { min: 0, max: 1.0 },
+  bgAsciiRampPreset: { min: 0, max: 2   },
 
 };

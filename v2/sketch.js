@@ -354,6 +354,16 @@
         V2_PARAMS._chromaBeatCurrent * 0.85 +
         audioManager.beatIntensity * V2_PARAMS.chromaBeat * 0.15;
 
+      // bgAscii audio-reactive brightness add — same envelope pattern as _chromaBeatCurrent.
+      if (V2_PARAMS.bgAsciiEnabled) {
+        const energy = audio.bands.bass * 0.5 + audio.bands.mid * 0.3 + audio.bands.treble * 0.2;
+        V2_PARAMS._bgAsciiAudioAdd =
+          V2_PARAMS._bgAsciiAudioAdd * 0.88 +
+          energy * V2_PARAMS.bgAsciiAudioMult * 0.12;
+      } else {
+        V2_PARAMS._bgAsciiAudioAdd = 0.0;
+      }
+
       bgLayer.tick();
       bgFx.update(audio);
       fusionMode.update(audio, renderer.cols, renderer.rows, bgLayer);
@@ -486,6 +496,13 @@
           // Toggle audio-reactive CSS filter FX on background layer
           V2_PARAMS.bgFxEnabled = !V2_PARAMS.bgFxEnabled;
           if (!V2_PARAMS.bgFxEnabled) bgFx.reset();
+          updateStatus();
+          break;
+
+        case 'V':
+          // Toggle bgAscii layer (ASCII art rendering of background luma)
+          V2_PARAMS.bgAsciiEnabled = !V2_PARAMS.bgAsciiEnabled;
+          if (!V2_PARAMS.bgAsciiEnabled) V2_PARAMS._bgAsciiAudioAdd = 0.0;
           updateStatus();
           break;
 
@@ -626,13 +643,14 @@
     const ph  = audioManager ? V2_CONFIG.PHOSPHOR_ORDER[V2_PARAMS.phosphorIndex] : '–';
     const glInfo    = renderer ? renderer.glVersion : '–';
     const scanName  = SCANLINE_NAMES[V2_PARAMS.scanlineMode] ?? 'OFF';
-    const bgState   = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
-    const bgFxState = V2_PARAMS.bgFxEnabled ? 'ON' : 'OFF';
+    const bgState    = V2_PARAMS.bgEnabled ? 'ON' : 'OFF';
+    const bgFxState  = V2_PARAMS.bgFxEnabled ? 'ON' : 'OFF';
+    const asciiState = V2_PARAMS.bgAsciiEnabled ? 'ON' : 'OFF';
     if (_statusInfoEl) {
-      _statusInfoEl.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | bgfx:${bgFxState} | ${glInfo}`;
+      _statusInfoEl.textContent = `[${src.toUpperCase()}] phosphor:${ph} | scanline:${scanName} | bg:${bgState} | bgfx:${bgFxState} | ascii:${asciiState} | ${glInfo}`;
     }
     if (_statusHelpEl) {
-      _statusHelpEl.textContent = ' | B=bg X=bgfx S=scanline P=phosphor L=load-bg M=bg-folder ←/→=cycle-bg F=full';
+      _statusHelpEl.textContent = ' | B=bg X=bgfx V=ascii-layer S=scanline P=phosphor L=load-bg M=bg-folder ←/→=cycle-bg F=full';
     }
   }
 

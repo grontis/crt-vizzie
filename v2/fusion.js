@@ -384,9 +384,32 @@ class V2FusionMode {
       this._glitchSeedTimer = 0;
     }
 
-    // ── Phase 4: Render — figure → wave → rain → glitch ─────────────────────
+    // ── Phase 4: Render — bgAscii → figure → wave → rain → glitch ──────────
 
-    // 4a. Figure
+    // 4a. bgAscii layer (bottom of stack — runs before figure so other layers overwrite it)
+    if (p.bgAsciiEnabled && bgLayer && bgLayer.isLoaded) {
+      const rampPreset = p.bgAsciiRampPreset | 0;
+      if (rampPreset !== this._bgAsciiLastPreset) {
+        this._buildBgAsciiRamp();
+      }
+      const effectiveLevel = Math.min(1.0, p.bgAsciiLevel + p._bgAsciiAudioAdd);
+      if (effectiveLevel > 0.01) {
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const idx = r * cols + c;
+            let luma  = bgLayer.getLuma(c, r);
+            if (p.bgAsciiInvert) luma = 1.0 - luma;
+            const rampIdx    = Math.min(255, Math.floor(luma * 255));
+            const charAtlasIdx = this._bgAsciiRamp[rampIdx];
+            if (charAtlasIdx !== 0) {
+              this._setCellByIdx(idx, charAtlasIdx, luma * effectiveLevel, 0);
+            }
+          }
+        }
+      }
+    }
+
+    // 4b. Figure
     if (p.figureEnabled) {
       const figOp = p.figOpacity;
       for (let r = 0; r < rows; r++) {
@@ -400,7 +423,7 @@ class V2FusionMode {
       }
     }
 
-    // 4b. Wave
+    // 4c. Wave
     if (p.waveEnabled) {
       const t         = this._waveTime;
       const threshold = Math.max(0.1, p.waveThreshold - this._waveThreshBoost);
@@ -441,7 +464,7 @@ class V2FusionMode {
       }
     }
 
-    // 4c. Rain
+    // 4d. Rain
     if (p.rainEnabled) {
       const rainOp = p.rainOpacity;
       for (let c = 0; c < cols; c++) {
@@ -471,7 +494,7 @@ class V2FusionMode {
       }
     }
 
-    // 4d. Glitch buffer (top layer)
+    // 4e. Glitch buffer (top layer)
     if (p.glitchEnabled) {
       const useCGA = p.glitchCgaEnabled;
       for (let r = 0; r < rows; r++) {
@@ -570,7 +593,30 @@ class V2FusionMode {
     this._waveBeatBoost   = 0;
     this._waveThreshBoost = 0;
 
+    // bgAscii layer state
+    this._bgAsciiRamp       = new Uint16Array(256);
+    this._bgAsciiLastPreset = -1; // -1 forces rebuild on first update
+    this._buildBgAsciiRamp();
+
     this._stampFigure(cols, rows);
+  }
+
+  /**
+   * Build the 256-entry bgAscii density ramp lookup table.
+   * Maps luma values [0..255] to atlas character indices using the configured
+   * density ramp string. Rebuilt when bgAsciiRampPreset changes.
+   */
+  _buildBgAsciiRamp() {
+    const preset  = window.V2_PARAMS.bgAsciiRampPreset | 0;
+    const ramps   = window.V2_CONFIG.ASCII_DENSITY_RAMPS;
+    const rampStr = ramps[Math.min(preset, ramps.length - 1)];
+    const len     = rampStr.length;
+    for (let i = 0; i < 256; i++) {
+      const charIdx = Math.min(len - 1, Math.floor((i / 255) * (len - 1)));
+      const ch      = rampStr[charIdx];
+      this._bgAsciiRamp[i] = this._charMap.get(ch) ?? 0;
+    }
+    this._bgAsciiLastPreset = preset;
   }
 
   _makeRainCol(rows, colIdx, totalCols) {
