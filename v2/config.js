@@ -180,9 +180,9 @@ window.V2_PARAMS = {
 
   // ASCII art layer (bgAscii) — V key toggles
   bgAsciiEnabled:    false, // bool: layer on/off
-  bgAsciiLevel:      0.7,   // float [0..1]: overall blend/brightness (static knob)
-  _bgAsciiAudioAdd:  0.0,   // float: audio-reactive add (written by sketch.js each frame)
-  bgAsciiAudioMult:  0.5,   // float [0..1]: how strongly audio drives brightness boost
+  bgAsciiLevel:      0.33,   // float [0..1]: overall blend/brightness (static knob)
+  _bgAsciiAudioAdd:  0.33,   // float: audio-reactive add (written by sketch.js each frame)
+  bgAsciiAudioMult:  0.33,   // float [0..1]: how strongly audio drives brightness boost
   bgAsciiInvert:     false, // bool: invert luma→ramp mapping (for dark-bg media)
   bgAsciiRampPreset: 0,     // int [0..2]: density ramp selector
 
