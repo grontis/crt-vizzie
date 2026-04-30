@@ -39,7 +39,7 @@ window.V2_CONFIG = {
   // Audio analysis
   FFT_SIZE:        1024,
   FFT_SMOOTHING:   0.65,
-  BEAT_THRESHOLD:  1.4,
+  BEAT_THRESHOLD:  1.25,
   BEAT_HISTORY:    43,
   BEAT_COOLDOWN:   300,       // ms minimum between beats
   BPM_HISTORY:     8,
@@ -145,8 +145,8 @@ window.V2_PARAMS = {
   waveCharRate:   0.006,
 
   // Glitch layer
-  glitchThreshold:    0.33,
-  glitchChance:       0.33,
+  glitchThreshold:    0.30,
+  glitchChance:       0.66,
   glitchScatter:      0.045,
   glitchTear:         0.020,
   glitchSeedInterval: 80,
@@ -158,7 +158,7 @@ window.V2_PARAMS = {
   glitchBlastThreshold:   0.40,
   glitchTrebleFloor:      0.15,
   glitchBeatSeedMin:      12,
-  glitchIntensityScale:   1.2,
+  glitchIntensityScale:   1.5,
 
   // BG (background image) layer
   bgEnabled:       true,
