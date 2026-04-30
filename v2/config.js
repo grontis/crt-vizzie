@@ -154,7 +154,7 @@ window.V2_PARAMS = {
 
   // BG (background image) layer
   bgEnabled:       true,
-  bgOpacity:       0.75,
+  bgOpacity:       0.65,
   bgLumaThreshold: 0.30,
   bgStutterAmp:    0.1,
 
