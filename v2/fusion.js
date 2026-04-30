@@ -223,11 +223,12 @@ class V2FusionMode {
       const beatPhase = (this._lastBeatTime > 0 && this._beatInterval > 0)
         ? Math.min(1, (now - this._lastBeatTime) / this._beatInterval)
         : 0;
+      const scaledIntensity = Math.min(1, beatIntensity * p.glitchIntensityScale);
 
       // Timer-based seeding
       this._glitchSeedTimer++;
       if (this._glitchSeedTimer >= p.glitchSeedInterval ||
-          (beatActive && this._glitchSeedTimer > 20)) {
+          (beatActive && this._glitchSeedTimer > p.glitchBeatSeedMin)) {
         this._glitchSeedTimer = 0;
         const choice = Math.floor(Math.random() * 3);
         if (choice === 0) {
@@ -242,8 +243,8 @@ class V2FusionMode {
       // Beat reactions
       if (beatActive) {
         // Random scatter
-        if (beatIntensity > 0.35) {
-          const count = Math.floor(beatIntensity * cols * rows * p.glitchScatter);
+        if (scaledIntensity > p.glitchScatterThreshold) {
+          const count = Math.floor(scaledIntensity * cols * rows * p.glitchScatter);
           for (let i = 0; i < count; i++) {
             const gr  = Math.floor(Math.random() * rows);
             const gc  = Math.floor(Math.random() * cols);
@@ -255,9 +256,9 @@ class V2FusionMode {
         }
 
         // Horizontal blast strip on hard beats
-        if (beatIntensity > 0.55) {
+        if (scaledIntensity > p.glitchBlastThreshold) {
           const blastRow   = Math.floor(Math.random() * rows);
-          const blastLen   = Math.floor(beatIntensity * cols * 0.65);
+          const blastLen   = Math.floor(scaledIntensity * cols * 0.65);
           const blastStart = Math.floor(Math.random() * Math.max(1, cols - blastLen));
           for (let bc = blastStart; bc < Math.min(cols, blastStart + blastLen); bc++) {
             const idx = blastRow * cols + bc;
@@ -268,14 +269,14 @@ class V2FusionMode {
         }
 
         // Spawn pulse wave
-        if (beatIntensity > p.glitchThreshold && Math.random() < p.glitchChance) {
+        if (scaledIntensity > p.glitchThreshold && Math.random() < p.glitchChance) {
           this._pulseWaves.push({
             cx:        Math.floor(Math.random() * cols),
             cy:        Math.floor(Math.random() * rows),
             r:         0,
-            maxR:      Math.max(cols, rows) * (0.4 + beatIntensity * 0.6),
-            speed:     0.4 + beatIntensity * 1.8,
-            intensity: beatIntensity,
+            maxR:      Math.max(cols, rows) * (0.4 + scaledIntensity * 0.6),
+            speed:     0.4 + scaledIntensity * 1.8,
+            intensity: scaledIntensity,
             colorBase: Math.floor(Math.random() * 16),
           });
         }
@@ -307,7 +308,7 @@ class V2FusionMode {
 
       // Treble noise
       const airEnergy = bands.highMid * 0.5 + bands.treble * 0.5;
-      if (airEnergy > 0.2) {
+      if (airEnergy > p.glitchTrebleFloor) {
         const noiseCount = Math.floor(airEnergy * cols * 0.15);
         for (let i = 0; i < noiseCount; i++) {
           const nr  = Math.floor(Math.random() * rows);

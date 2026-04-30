@@ -146,17 +146,22 @@ window.V2_PARAMS = {
   glitchDecayRate:    0.010,
   glitchSmearChance:  0.33,
   glitchDropChance:   0.025,
+  glitchScatterThreshold: 0.20,
+  glitchBlastThreshold:   0.40,
+  glitchTrebleFloor:      0.15,
+  glitchBeatSeedMin:      12,
+  glitchIntensityScale:   1.2,
 
   // BG (background image) layer
   bgEnabled:       true,
-  bgOpacity:       0.65,
+  bgOpacity:       0.75,
   bgLumaThreshold: 0.30,
   bgStutterAmp:    0.1,
 
   // BG FX (audio-reactive CSS filters on the bg layer)
   bgFxEnabled:    true,
-  bgFxHueShift:   150.0,
-  bgFxSaturation: 2.0,
+  bgFxHueShift:   35.0,
+  bgFxSaturation: 1.1,
   bgFxBrightness: 1.0,
   bgFxContrast:   0.25,
   bgFxBlur:       1.0,
@@ -209,6 +214,11 @@ window.V2_PARAM_RANGES = {
   glitchDecayRate:    { min: 0.002, max: 0.05  },
   glitchSmearChance:  { min: 0,     max: 0.3   },
   glitchDropChance:   { min: 0,     max: 0.1   },
+  glitchScatterThreshold: { min: 0.05, max: 0.60 },
+  glitchBlastThreshold:   { min: 0.15, max: 0.80 },
+  glitchTrebleFloor:      { min: 0.02, max: 0.40 },
+  glitchBeatSeedMin:      { min: 4,    max: 40   },
+  glitchIntensityScale:   { min: 0.5,  max: 2.0  },
 
   bgOpacity:        { min: 0,    max: 1.0  },
   bgLumaThreshold:  { min: 0.1,  max: 0.8  },
