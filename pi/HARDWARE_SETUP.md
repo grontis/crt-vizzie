@@ -174,6 +174,25 @@ eliminates ADC jitter from electrical noise.
 
 ---
 
+## Wiring: Pushbuttons
+
+Two momentary pushbuttons trigger browser actions when pressed.
+
+gpiozero enables the Pi's internal pull-up resistor automatically — **no external resistor is needed**. Wire each button between a GPIO pin and GND.
+
+```
+  GPIO pin ──┤button├── GND
+```
+
+| Button | Action | GPIO | Header Pin |
+|--------|---------|------|------------|
+| Button 1 | Next background media (→) | GPIO23 | Pin 16 |
+| Button 2 | Toggle bg ASCII layer (V) | GPIO24 | Pin 18 |
+
+Use normally-open (NO) momentary pushbuttons. The bridge debounces each button at 50 ms.
+
+---
+
 ## Wiring: Slider potentiometers (B10K)
 
 Sliders are electrically identical to rotary pots. Check the datasheet or use a

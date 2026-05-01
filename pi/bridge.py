@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # bridge.py — Hardware bridge for crt-vizzie v2
 #
-# Phase 1: MCP3008 potentiometers → V2_PARAMS, LEDs → audio band brightness.
+# Phase 1: MCP3008 potentiometers → V2_PARAMS, LEDs → audio band brightness,
+#           pushbuttons → browser key events.
 # Protocol:
-#   Pi → Browser: { "type": "hw", "params": { "chromaBase": 4.0, ... } }
-#   Browser → Pi: { "type": "audio", ... }  ← silently discarded
+#   Pi → Browser: { "type": "hw",       "params": { "chromaBase": 4.0, ... } }
+#   Pi → Browser: { "type": "hw_event", "event": "next_bg" }
+#   Browser → Pi: { "type": "audio", ... }  ← drives LED PWM
 #
 # Usage: python3 bridge.py [--mock]
 
@@ -45,6 +47,12 @@ LED_CONFIG = [
     {"gpio": 13, "band": "treble"},
 ]
 
+# GPIO pins for pushbuttons. Each fires a named event to the browser.
+BUTTON_CONFIG = [
+    {"gpio": 23, "event": "next_bg"},
+    {"gpio": 24, "event": "toggle_bg_ascii"},
+]
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -65,7 +73,7 @@ if not _MOCK_MODE:
             '  To run without hardware:  python3 bridge.py --mock'
         )
     try:
-        from gpiozero import PWMLED
+        from gpiozero import PWMLED, Button
     except ImportError:
         sys.exit(
             '[bridge] ERROR: gpiozero not found.\n'
@@ -83,6 +91,7 @@ _queue: asyncio.Queue          # assigned in _main() before poll thread starts
 _last_sent: dict = {}
 _spi: list  = [None, None]     # [CE0, CE1] — opened in _main() for each wired chip
 _leds: list = []               # PWMLED instances, populated in _main()
+_buttons: list = []            # Button instances, populated in _main()
 
 # ── SPI read ──────────────────────────────────────────────────────────────────
 
@@ -139,8 +148,11 @@ async def _recv_loop(websocket) -> None:
 
 async def _send_loop(websocket) -> None:
     while True:
-        updates = await _queue.get()
-        msg = json.dumps({'type': 'hw', 'params': updates})
+        item = await _queue.get()
+        if '_event' in item:
+            msg = json.dumps({'type': 'hw_event', 'event': item['_event']})
+        else:
+            msg = json.dumps({'type': 'hw', 'params': item})
         try:
             await websocket.send(msg)
         except Exception as exc:
@@ -187,6 +199,16 @@ async def _main(mock: bool) -> None:
             _leds.append(PWMLED(cfg['gpio']))
         log.info('[bridge] %d LEDs initialized (GPIO %s)',
                  len(_leds), [c['gpio'] for c in LED_CONFIG])
+
+        for cfg in BUTTON_CONFIG:
+            event_name = cfg['event']
+            btn = Button(cfg['gpio'], bounce_time=0.05)
+            btn.when_pressed = lambda name=event_name: asyncio.run_coroutine_threadsafe(
+                _queue.put({'_event': name}), loop
+            )
+            _buttons.append(btn)
+        log.info('[bridge] %d buttons initialized (GPIO %s)',
+                 len(_buttons), [c['gpio'] for c in BUTTON_CONFIG])
 
     if mock:
         await _queue.put({'chromaBase': 4.0})

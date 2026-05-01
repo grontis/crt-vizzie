@@ -72,6 +72,22 @@
     }
   }
 
+  // ── Hardware event dispatcher ─────────────────────────────────────────────────
+
+  const HW_EVENT_KEYS = {
+    next_bg:         'ArrowRight',
+    toggle_bg_ascii: 'v',
+  };
+
+  function dispatchHwEvent(eventName) {
+    const key = HW_EVENT_KEYS[eventName];
+    if (!key) {
+      console.warn(LOG_PREFIX, 'Unknown hw_event:', eventName);
+      return;
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  }
+
   // ── Message handler ───────────────────────────────────────────────────────────
 
   function handleMessage(event) {
@@ -80,6 +96,11 @@
       msg = JSON.parse(event.data);
     } catch (e) {
       console.warn(LOG_PREFIX, 'Non-JSON message ignored:', event.data);
+      return;
+    }
+
+    if (msg.type === 'hw_event') {
+      dispatchHwEvent(msg.event);
       return;
     }
 
