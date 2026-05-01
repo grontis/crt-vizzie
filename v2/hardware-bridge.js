@@ -48,8 +48,9 @@
     const range = ranges && ranges[key];
     if (range) {
       let clamped = Math.max(range.min, Math.min(range.max, value));
-      // If the range is integer-bounded (e.g. phosphorIndex), round to nearest integer
-      if (Number.isInteger(range.min) && Number.isInteger(range.max)) {
+      // Round only when the range spans more than 1 — avoids rounding float params
+      // like bgOpacity {0,1} where Number.isInteger(1.0) === true in JS.
+      if (Number.isInteger(range.min) && Number.isInteger(range.max) && (range.max - range.min) > 1) {
         clamped = Math.round(clamped);
       }
       params[key] = clamped;

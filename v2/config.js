@@ -60,7 +60,7 @@ window.V2_CONFIG = {
     red:   { dim: [0.239, 0.000, 0.000], mid: [0.533, 0.000, 0.000], bright: [1.000, 0.133, 0.000] },
     white: { dim: [0.133, 0.133, 0.133], mid: [0.667, 0.667, 0.667], bright: [0.941, 0.941, 0.941] },
   },
-  PHOSPHOR_ORDER: ['green', 'amber', 'blue', 'red', 'white'],
+  PHOSPHOR_ORDER: ['red', 'amber', 'green', 'blue', 'white'],
 
   // ASCII density ramps (lightest to darkest visual weight)
   // Used by the bgAscii layer in fusion.js to map background luma to characters.
@@ -99,7 +99,7 @@ window.V2_CONFIG = {
 window.V2_PARAMS = {
 
   // Phosphor preset (index into V2_CONFIG.PHOSPHOR_ORDER)
-  phosphorIndex: 0,
+  phosphorIndex: 2,
 
   // Beat-reactive chroma offset (internal state, updated by sketch.js each frame)
   _chromaBeatCurrent: 0,
@@ -128,7 +128,7 @@ window.V2_PARAMS = {
 
   // Rain layer
   rainSpeedMin:  0.01,
-  rainSpeedMax:  0.1,
+  rainSpeedMax:  0.2,
   rainBeatMult:  8.2,
   rainTrail:     6,
   rainInteract:  0.50,

@@ -6,14 +6,14 @@
 #
 # Starts:
 #   1. Python HTTP file server on port 8080 (serves the visualizer from repo root)
-#   2. pi-bridge.py WebSocket bridge on port 9001 (reads MCP3008 ADC → FUSION_PARAMS)
+#   2. bridge.py WebSocket bridge on port 9001 (reads MCP3008 ADC → V2_PARAMS)
 #
 # Open http://localhost:8080 in Chromium after starting.
 #
 # Dependencies (Raspberry Pi):
 #   pip install websockets
 #
-# The HTTP server is killed automatically when pi-bridge.py exits (Ctrl+C).
+# The HTTP server is killed automatically when bridge.py exits (Ctrl+C).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$(dirname "$SCRIPT_DIR")"
@@ -25,4 +25,4 @@ echo "[pi-start] HTTP server started (PID $HTTP_PID) on http://localhost:8080"
 trap "echo '[pi-start] Stopping HTTP server...'; kill $HTTP_PID 2>/dev/null" EXIT
 
 echo "[pi-start] Starting hardware bridge..."
-python "$SCRIPT_DIR/pi-bridge.py"
+python "$SCRIPT_DIR/bridge.py"

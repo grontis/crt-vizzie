@@ -1,7 +1,7 @@
 # Hardware Setup Guide — Raspberry Pi 5 + MCP3008 + Knobs/Sliders + LEDs
 
-This guide wires your physical controls into crt-vizzie's `FUSION_PARAMS` system via
-the `pi-bridge.py` WebSocket bridge.
+This guide wires your physical controls into crt-vizzie's `V2_PARAMS` system via
+the `bridge.py` WebSocket bridge.
 
 ---
 
@@ -292,7 +292,7 @@ Open `http://localhost:8080` in Chromium.
 
 ## Configuring channels (hw-mapping.json)
 
-`pi/hw-mapping.json` maps each ADC channel to a `FUSION_PARAMS` key. The `chip` field
+`pi/hw-mapping.json` maps each ADC channel to a `V2_PARAMS` key. The `chip` field
 selects which MCP3008 to read (0 = CE0, 1 = CE1). `channel` is 0–7 on that chip.
 
 ```json
