@@ -79,10 +79,6 @@ class V2FusionMode {
     this._waveBeatBoost   = 0;
     this._waveThreshBoost = 0;
 
-    // BG layer state
-    this._bgKickPulse    = 0; // float, decays each frame
-    this._bgStutterPhase = 0; // float, treble-driven stutter offset
-
     this._init(cols, rows);
   }
 

@@ -163,8 +163,6 @@ window.V2_PARAMS = {
   // BG (background image) layer
   bgEnabled:       true,
   bgOpacity:       0.55,
-  bgLumaThreshold: 0.30,
-  bgStutterAmp:    0.1,
 
   // BG FX (audio-reactive CSS filters on the bg layer)
   bgFxEnabled:    true,
@@ -206,8 +204,8 @@ window.V2_PARAM_RANGES = {
   figSmear:        { min: 0,     max: 0.1   },
   figOpacity:      { min: 0,     max: 1.0   },
 
-  rainSpeedMin:    { min: 0.05,  max: 0.5   },
-  rainSpeedMax:    { min: 0.3,   max: 2.0   },
+  rainSpeedMin:    { min: 0.01,  max: 0.5   },
+  rainSpeedMax:    { min: 0.1,   max: 2.0   },
   rainBeatMult:    { min: 1.0,   max: 6.0   },
   rainTrail:       { min: 4,     max: 30    },
   rainInteract:    { min: 0,     max: 1.0   },
@@ -237,8 +235,6 @@ window.V2_PARAM_RANGES = {
   glitchIntensityScale:   { min: 0.5,  max: 2.0  },
 
   bgOpacity:        { min: 0,    max: 1.0  },
-  bgLumaThreshold:  { min: 0.1,  max: 0.8  },
-  bgStutterAmp:     { min: 0,    max: 0.2  },
 
   // BG FX (audio-reactive CSS filters on the bg layer)
   bgFxHueShift:    { min: 0,   max: 180.0 },

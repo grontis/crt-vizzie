@@ -25,13 +25,17 @@ DEAD_ZONE = 0.005
 WS_HOST   = 'localhost'
 WS_PORT   = 9001
 
+# Note: chip 0 / ch 0 is intentionally shadowed by the first three entries.
+# A single pot on ch 0 drives rainOpacity, rainBurnBoost, and rainSpeedMin
+# simultaneously. Reassign to free channels (7+ on chip 0, or chip 1) once
+# more pots are wired up.
 CHANNELS = [
     {"chip": 0, "ch": 0, "param": "rainOpacity",   "min": 0.0, "max": 1.0},
     {"chip": 0, "ch": 0, "param": "rainBurnBoost", "min": 0.0, "max": 0.5},
     {"chip": 0, "ch": 0, "param": "rainSpeedMin", "min": 0.01, "max": 0.2},
     {"chip": 0, "ch": 1, "param": "bgOpacity",   "min": 0.0, "max": 1.0},
     {"chip": 0, "ch": 2, "param": "bgFxHueShift",   "min": 0.0, "max": 100.0},
-    {"chip": 0, "ch": 3, "param": "glitchScatter",   "min": 0.045, "max": 0.2},
+    {"chip": 0, "ch": 3, "param": "glitchScatter",   "min": 0.045, "max": 0.15},
     {"chip": 0, "ch": 4, "param": "figBrightness",   "min": 0.5, "max": 1.0},
     {"chip": 0, "ch": 5, "param": "bgAsciiLevel",   "min": 0.0, "max": 1.0},
     {"chip": 0, "ch": 6, "param": "phosphorIndex", "min": 0, "max": 4},

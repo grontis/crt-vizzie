@@ -285,8 +285,9 @@ pip install websockets spidev
 ```
 
 `spidev` requires SPI to be enabled in raspi-config first. On non-Pi machines
-`spidev` will fail to install — that is expected; `pi-bridge.py` falls back to mock
-sine-wave mode automatically.
+`spidev` will fail to install — that is expected. Run `bridge.py --mock` instead;
+it skips SPI/GPIO entirely and emits a single hardcoded test message so you can
+verify the WebSocket connection without hardware.
 
 ### 3. Verify SPI user permissions
 
@@ -309,44 +310,57 @@ Open `http://localhost:8080` in Chromium.
 
 ---
 
-## Configuring channels (hw-mapping.json)
+## Configuring channels and buttons
 
-`pi/hw-mapping.json` maps each ADC channel to a `V2_PARAMS` key. The `chip` field
-selects which MCP3008 to read (0 = CE0, 1 = CE1). `channel` is 0–7 on that chip.
+The knob → V2_PARAMS mapping is the `CHANNELS` list near the top of `bridge.py`:
 
-```json
-{
-  "channels": [
-    { "chip": 0, "channel": 0, "param": "rainSpeedMax", "min": 0.3, "max": 2.0 },
-    { "chip": 1, "channel": 0, "param": "waveOpacity",  "min": 0.0, "max": 1.0 }
-  ]
-}
+```python
+CHANNELS = [
+    {"chip": 0, "ch": 0, "param": "rainOpacity",   "min": 0.0, "max": 1.0},
+    {"chip": 0, "ch": 1, "param": "bgOpacity",     "min": 0.0, "max": 1.0},
+    # ...
+]
 ```
 
-For nested params (the `bgFx` sub-object), use dot notation: `"bgFx.warpAmount"`.
+`chip` selects which MCP3008 to read (0 = CE0, 1 = CE1). `ch` is 0–7 on that chip.
+`min`/`max` define the engineering range the knob scrolls through.
 
-All available params and their valid ranges are in `fusion-params.js` under
-`window.FUSION_PARAM_RANGES`. Do not map boolean params (e.g. `figureEnabled`) —
-the bridge only routes numeric values.
+The button → browser action mapping is the `BUTTON_CONFIG` list right below:
+
+```python
+BUTTON_CONFIG = [
+    {"gpio": 23, "event": "next_bg"},
+    {"gpio": 24, "event": "toggle_bg_ascii"},
+]
+```
+
+Button presses send a `{type: "hw_event", event: "<name>"}` message; the browser
+maps each event to a synthetic keypress in `v2/hardware-bridge.js` (`HW_EVENT_KEYS`).
+
+All available param keys and their valid ranges live in `v2/config.js` under
+`V2_PARAMS` and `V2_PARAM_RANGES`. Boolean params (e.g. `figureEnabled`) can be
+mapped — `hardware-bridge.js` coerces numeric 0/1 to a Boolean.
 
 ---
 
 ## Testing without hardware
 
-Run `python pi/pi-bridge.py` on any machine. When `spidev` is unavailable the bridge
-automatically generates slowly-changing sine-wave values for every configured channel.
-Open the app in the browser and watch the Fusion panel sliders move.
+Run `python3 pi/bridge.py --mock` on any machine. `--mock` skips all SPI/GPIO
+initialization and emits one fixed `{chromaBase: 4.0}` test message at startup,
+then sits idle on the WebSocket. Useful for verifying the connection from the
+browser side without a Pi attached.
 
-You can verify the WebSocket message format by watching the bridge's log output
-(DEBUG level is on by default).
+For richer offline testing, edit V2_PARAMS directly in the browser DevTools console.
 
 ---
 
-## Adding LED behavior
+## LED behavior
 
-Fill in `pi/led_output.py`. The bridge calls `update_leds(beat_active, beat_intensity, bands)`
-at ~16 Hz whenever the browser is connected. See the docstring and examples in that file.
-No other files need to change.
+LED brightness is driven from the browser-side audio bands. The browser sends
+`{type: "audio", bands: {sub, bass, lowMid, mid, highMid, treble}, ...}` at ~16 Hz;
+`bridge.py:_update_leds` maps each band 0–1 value to the corresponding PWMLED.value.
+
+To change which band drives which LED, edit `LED_CONFIG` in `bridge.py`.
 
 ---
 

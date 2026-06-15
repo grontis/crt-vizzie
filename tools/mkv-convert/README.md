@@ -45,16 +45,16 @@ These settings are fixed.  If you need different settings, edit
 
 ## After conversion
 
-Place the `.mp4` output in `v2/bg-media/` and run `gen-manifest.py` to
-register it in the background-media playlist:
+Drop the `.mp4` output into whatever folder the visualizer's bg-folder picker
+(M key) points at — typically `v2/bg-media/`:
 
 ```
 cp output.mp4 v2/bg-media/
-python3 v2/bg-media/gen-manifest.py
 ```
 
-Then use the **ArrowLeft / ArrowRight** keys in the visualizer to cycle to it,
-or press **L** to load it directly from any path.
+The playlist is read live from the filesystem via the File System Access API,
+so no manifest step is needed. Use the **ArrowLeft / ArrowRight** keys to
+cycle to it, or press **L** to load it directly from any path.
 
 ## Running the tests
 

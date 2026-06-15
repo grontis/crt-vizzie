@@ -670,10 +670,9 @@
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────
-  // Kiosk auto-start is now handled inside V2StartupScreen (8s kiosk timer
-  // that auto-selects DEMO if no user input arrives after the menu appears).
-  // The --autoplay-policy=no-user-gesture-required Chromium flag is still
-  // required for the AudioContext to work without a gesture on Pi kiosk.
+  // On Pi kiosk deployments, run Chromium with
+  // --autoplay-policy=no-user-gesture-required so the AudioContext can resume
+  // without a click. The startup screen still requires a key/click selection.
 
   document.addEventListener('DOMContentLoaded', async () => {
     await init();

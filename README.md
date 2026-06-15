@@ -32,12 +32,18 @@ Arrow keys move the highlight; Enter confirms.
 | `D` | Toggle demo synthesizer |
 | `A` | Load audio file (MP3/OGG/WAV) |
 | `B` | Toggle background image layer on/off |
+| `X` | Toggle audio-reactive bg FX (filter/transform) |
+| `V` | Toggle background ASCII layer (luma → density ramp) |
 | `L` | Load a single background image or video from file |
+| `M` | Pick / re-pick the bg-media folder (FS Access API) |
 | `←` / `→` | Cycle through background media playlist (see below) |
 | `S` | Cycle scanline mode (OFF → PIXEL → CELL-GAP → SMOOTH) |
 | `P` | Cycle phosphor color (green → amber → blue → red → white) |
+| `Tab` | Toggle live bg-FX tuning panel |
 | `F` | Toggle fullscreen (works during startup screen too) |
-| `Escape` | Exit fullscreen |
+| `Escape` | Close bg-FX panel; otherwise exit fullscreen |
+| `` ` `` | Show glyph atlas debug overlay (requires `#debug-atlas` in URL) |
+| `~` | Toggle FPS / frame-time overlay |
 | Drop audio file | Load and loop as audio source |
 
 #### Scanline modes
@@ -53,56 +59,33 @@ Arrow keys move the highlight; Enter confirms.
 
 ## Background media
 
-The visualizer can cycle through a folder of images and videos as the layer behind the ASCII grid. Files are user-supplied (not in the repo) and discovered via a `manifest.json` listing.
+The visualizer cycles through a folder of images and videos as the layer behind the ASCII grid. The playlist is read live from the local filesystem via the **File System Access API** — there is no manifest, no copy step, and media is streamed from disk on demand (no full-file buffering).
 
-**Supported formats:** `.jpg .jpeg .png .gif .webp` (images) — `.mp4 .webm .mov` (video, looped + muted).
+**Supported formats:** `.jpg .jpeg .png .gif .webp` (images) — `.mp4 .webm .mov .mkv .m4v` (video, looped + muted).
 
-> **Got `.mkv` files?** Chrome and Firefox don't support Matroska in HTML5 `<video>`. Remux to MP4 — for most files this is lossless and fast (no re-encode):
->
-> ```bash
-> ffmpeg -i input.mkv -c copy output.mp4
-> ```
->
-> If `ffmpeg` complains about an incompatible audio codec (e.g., FLAC), re-encode just the audio:
->
-> ```bash
-> ffmpeg -i input.mkv -c:v copy -c:a aac output.mp4
-> ```
+> **Codec note.** Container support varies by browser — Chromium plays MP4/H.264 and WebM/VP9 reliably; some MKV/HEVC/AV1 files won't decode. If a clip fails to load, the playlist auto-advances to the next file and shows the error briefly.
 
 ### Setup
 
-1. Drop your media files into `v2/bg-media/`. The folder is gitignored except for `.gitkeep` and the helper script, so your files won't be committed.
+1. Press `M`. A folder picker opens — choose any directory containing supported media. The browser remembers the granted handle in IndexedDB, so subsequent launches restore it silently.
 
-   ```bash
-   cp ~/Pictures/foo.jpg ~/Videos/bar.mp4 v2/bg-media/
-   ```
+2. Press `→` and `←` to cycle. The picked file plays from disk via the OS file handle — bytes are read on demand, never buffered into memory.
 
-2. Regenerate the manifest:
+3. To use a different folder later, press `M` again.
 
-   ```bash
-   python3 v2/bg-media/gen-manifest.py
-   ```
-
-   The script scans `v2/bg-media/` for supported extensions, sorts alphabetically, and writes `manifest.json` next to itself. Re-run any time you add or remove files.
-
-3. Reload the page. The first manifest entry loads automatically as the background.
-
-If `manifest.json` is missing or empty, the background layer simply stays off — no error, the visualizer still runs.
+> **Browser support.** The folder picker requires a Chromium-based browser (Chrome, Edge, Brave, Chromium). Firefox doesn't implement `showDirectoryPicker` yet — use `L` to load individual files instead.
 
 ### Usage
 
 | Key | Action |
 |---|---|
+| `M` | Pick / re-pick the bg-media folder |
 | `→` | Next file in the playlist (wraps to first at the end) |
 | `←` | Previous file (wraps to last at the start) |
 | `B` | Toggle the background layer on/off |
 | `L` | Load a single file from outside the folder (clears playlist position) |
 
 The current filename briefly flashes in the status bar on each cycle. If a file fails to load, the cycle skips to the next entry and shows the error in red.
-
-### Custom folder
-
-To point at a different directory, edit `V2_CONFIG.BG_MEDIA_FOLDER` in `v2/config.js`. The path is resolved relative to `v2/` (the HTTP server root), so a folder served at `v2/my-media/` would be `BG_MEDIA_FOLDER: 'my-media'`.
 
 ---
 
@@ -126,36 +109,29 @@ This starts a local HTTP server on port 8080 and opens Chromium in kiosk mode wi
 If you have physical knobs/sliders connected via MCP3008 ADC:
 
 ```bash
-pip install websockets    # one-time
-python3 pi/pi-bridge.py
+pip install websockets spidev gpiozero    # one-time
+python3 pi/bridge.py
 ```
 
-The bridge runs a WebSocket server on port 9001. The browser app connects automatically and reconnects if the bridge restarts. See `pi/HARDWARE_SETUP.md` for wiring and `pi/hw-mapping.json` to map ADC channels to visual parameters.
+The bridge runs a WebSocket server on port 9001. The browser app connects automatically and reconnects if the bridge restarts. See `pi/HARDWARE_SETUP.md` for wiring; the knob → param mapping and button → action mapping live in the `CHANNELS` and `BUTTON_CONFIG` lists at the top of `pi/bridge.py`.
 
-**No hardware?** Use the desktop simulator instead:
-
-```bash
-python3 pi/pi-sim.py      # starts the simulator WebSocket server
-# then open pi/sim-ui.html in a browser for drag sliders
-```
-
-See `pi/SIM.md` for details.
+**No hardware?** Run `python3 pi/bridge.py --mock` — it skips SPI/GPIO and emits one test message so you can verify the WebSocket round-trip without a Pi attached.
 
 ### Autostart on boot
 
-Add to `/etc/rc.local` (before `exit 0`), or create a systemd unit:
+Use `pi/pi-start.sh` (starts both the HTTP server and the bridge) or, for kiosk mode, run them separately. For systemd, create a unit invoking:
 
 ```bash
 cd /home/pi/crt-vizzie && ./v2/kiosk.sh &
-python3 /home/pi/crt-vizzie/pi/pi-bridge.py &
+python3 /home/pi/crt-vizzie/pi/bridge.py &
 ```
 
 ---
 
 ## Hardware controls (MCP3008)
 
-The `pi/` directory contains a Python bridge that reads potentiometers and sliders via two MCP3008 ADCs over SPI and pushes their values into the visualizer in real time. It also receives beat and frequency data from the browser to drive LEDs via GPIO.
+The `pi/` directory contains a Python bridge that reads potentiometers and sliders via MCP3008 ADC(s) over SPI and pushes their values into the visualizer in real time. It also receives beat and frequency data from the browser to drive LEDs and reads pushbuttons that trigger browser actions.
 
-- `pi/hw-mapping.json` — maps each ADC channel to a visual parameter with min/max range
-- `pi/led_output.py` — stub for LED/GPIO output; fill in your `rpi_ws281x` / `RPi.GPIO` calls here
-- `pi/HARDWARE_SETUP.md` — full wiring guide
+- `pi/bridge.py` — single-file WebSocket bridge (ADC polling, LED PWM, button events)
+- `pi/HARDWARE_SETUP.md` — wiring guide and `CHANNELS` / `BUTTON_CONFIG` reference
+- `pi/pi-start.sh` — convenience launcher that brings up the HTTP server and the bridge together

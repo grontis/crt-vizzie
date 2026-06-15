@@ -9,7 +9,7 @@
 #   - Chromium browser installed (chromium-browser package)
 #   - Python 3 available (python3 in PATH)
 #   - Wayland compositor running (default on Bookworm with labwc or wayfire)
-#   - pi-bridge.py running (optional — hardware controls; silent if absent)
+#   - pi/bridge.py running (optional — hardware controls; silent if absent)
 #
 # The script starts python3 http.server for the v2 app and Chromium in kiosk
 # mode. When Chromium exits (e.g. from Escape or SIGTERM), the HTTP server is

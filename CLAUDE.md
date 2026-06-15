@@ -10,10 +10,8 @@ Read it before touching any code.
 ```
 crt-vizzie/
   v2/              active application (WebGL 2 ASCII visualizer)
-  pi/              hardware bridge for Raspberry Pi (currently being rewritten — do not rely on its contents)
-  PERFORMANCE.md   analysis of v1 bottlenecks and v2 fixes
+  pi/              hardware bridge for Raspberry Pi (bridge.py, HARDWARE_SETUP.md, pi-start.sh)
   README.md        user-facing overview
-  REPORT.md        audit findings and improvement notes (2026-04-28)
 ```
 
 There is no v1 directory on this branch. There is no `modes/` directory. There is no p5.js.
@@ -231,7 +229,9 @@ Scanline modes (controlled by `V2_PARAMS.scanlineMode`, valid range 0–3):
   reintroduce a manifest fetch — large/4K media played via HTTP without Range support
   thrashes the dev server and stutters audio/FPS, which is exactly why the FS Access
   API path replaced it.
-- `pi/` is being rewritten. Do not document or rely on its current contents.
+- The `pi/bridge.py` knob/button → V2_PARAMS mapping lives in the `CHANNELS` and
+  `BUTTON_CONFIG` lists at the top of that file. There is no `hw-mapping.json` and
+  no `FUSION_PARAM_RANGES` — use `V2_PARAM_RANGES` from `v2/config.js`.
 
 ---
 

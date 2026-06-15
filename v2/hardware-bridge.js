@@ -44,6 +44,10 @@
       return;
     }
 
+    // Reject NaN / Infinity before they can land in V2_PARAMS — Math.max/min
+    // pass NaN through, and downstream consumers produce blank frames.
+    if (typeof value !== 'number' || !Number.isFinite(value)) return;
+
     // Numeric param — clamp to range if available, round to integer if both bounds are integers
     const range = ranges && ranges[key];
     if (range) {
