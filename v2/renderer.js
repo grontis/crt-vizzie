@@ -33,7 +33,7 @@ precision highp usampler2D;
 // ── Samplers ────────────────────────────────────────────────────────
 // Glyph atlas: GL_R8 texture — one channel, white glyph on black background
 uniform sampler2D    u_glyphAtlas;
-// Per-cell data: RG16UI — .r = charIdx (0-255), .g = brightness * 65535
+// Per-cell data: RG16UI — .r = charIdx (0-65535), .g = brightness * 65535
 uniform usampler2D   u_cellData;
 // Per-cell CGA color index: R8 (normalized float) — 0 = use phosphor, 1-15 = CGA palette index
 uniform sampler2D    u_cellColor;
@@ -354,14 +354,7 @@ class V2Renderer {
     gl.uniform1f(this._uniforms.u_scanline,     params.scanlineIntensity || 0);
     gl.uniform1i(this._uniforms.u_scanlineMode, params.scanlineMode || 0);
 
-    // CGA palette — flat vec3 array (16 × 3 = 48 floats, pre-allocated)
-    const cgaFlat = this._cgaFlatBuf;
-    for (let i = 0; i < 16; i++) {
-      cgaFlat[i * 3 + 0] = cfg.CGA_COLORS[i][0];
-      cgaFlat[i * 3 + 1] = cfg.CGA_COLORS[i][1];
-      cgaFlat[i * 3 + 2] = cfg.CGA_COLORS[i][2];
-    }
-    gl.uniform3fv(this._uniforms.u_cgaColors, cgaFlat);
+    // CGA palette is uploaded once in _init() (immutable) — not re-sent per frame.
 
     // Draw
     gl.bindVertexArray(this._vao);
@@ -387,6 +380,22 @@ class V2Renderer {
     ];
     for (const name of uNames) {
       this._uniforms[name] = gl.getUniformLocation(this._program, name);
+    }
+
+    // CGA palette is immutable (V2_CONFIG.CGA_COLORS never changes) — upload once.
+    // Uniform values persist as program state across useProgram, and _program is
+    // never relinked, so this survives for the lifetime of the renderer.
+    {
+      const cfg     = this._config;
+      const cgaFlat = this._cgaFlatBuf;
+      for (let i = 0; i < 16; i++) {
+        cgaFlat[i * 3 + 0] = cfg.CGA_COLORS[i][0];
+        cgaFlat[i * 3 + 1] = cfg.CGA_COLORS[i][1];
+        cgaFlat[i * 3 + 2] = cfg.CGA_COLORS[i][2];
+      }
+      gl.useProgram(this._program);
+      gl.uniform3fv(this._uniforms.u_cgaColors, cgaFlat);
+      gl.useProgram(null);
     }
 
     // Full-screen quad VAO

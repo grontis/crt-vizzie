@@ -84,6 +84,7 @@ class BgFxManager {
 
     // Filter emission order:
     // [blur if > 0] brightness saturate hue-rotate contrast [sepia if > 0] [grayscale if > 0] [invert if > 0]
+    // All interpolated values are clamped numeric floats (.toFixed) — no escaping needed.
     this._el.style.filter =
       `${blurPart}brightness(${bright.toFixed(2)}) saturate(${sat.toFixed(2)}) hue-rotate(${hue.toFixed(1)}deg) contrast(${contrast.toFixed(2)})${sepiaPart}${grayscalePart}${invertPart}`;
 

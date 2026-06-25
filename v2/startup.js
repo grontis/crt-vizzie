@@ -21,7 +21,7 @@ class V2StartupScreen {
     'CPU: ARM CORTEX-A76 x4  3.6GHz  [OK]',
     'MEMORY: 8192MB LPDDR4X  [OK]',
     'WebGL2: INITIALIZING... DONE  [OK]',
-    'GLYPH ATLAS: 275 chars  [OK]',
+    'GLYPH ATLAS: 275 chars  [OK]',   // set dressing — real count logged by renderer; atlas not built when this prints
     'AUDIO ENGINE: READY  [OK]',
     '──────────────────────────────────────',
     'SELECT INPUT SOURCE:',

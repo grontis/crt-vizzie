@@ -545,12 +545,6 @@ class V2FusionMode {
     return this._charMap.get(pool[Math.floor(Math.random() * pool.length)]) || 0;
   }
 
-  /** Return a random katakana char as a string (used by seed helpers). */
-  _katakana() {
-    const pool = this._config.KATAKANA;
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
   // ── Initialization ───────────────────────────────────────────────────────
 
   _init(cols, rows) {

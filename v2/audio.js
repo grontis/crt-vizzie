@@ -27,7 +27,6 @@ class V2AudioManager {
     this._demoOsc      = null;
     this._demoLfo      = null;
     this._demoLfoGain  = null;
-    this._demoNoise    = null;
 
     // File audio
     this._audioEl       = null;
@@ -51,7 +50,6 @@ class V2AudioManager {
     this._beatIntensity   = 0;
     this._beatActive      = false;
     this._lastBeatTime    = 0;
-    this._beatTimestamps  = [];
 
     // Demo synthesizer state (CPU-side, drives demo band values directly)
     this._demoTime       = 0;
@@ -207,17 +205,6 @@ class V2AudioManager {
   getWaveform() { return this._waveform; }
   getBands()    { return this._bands; }
 
-  getAudioState() {
-    return {
-      isIdle:        this.isIdle,
-      spectrum:      this._spectrum,
-      waveform:      this._waveform,
-      bands:         this._bands,
-      beatActive:    this._beatActive,
-      beatIntensity: this._beatIntensity,
-    };
-  }
-
   // ── Per-frame update ────────────────────────────────────────────────────────
 
   update() {
@@ -248,14 +235,13 @@ class V2AudioManager {
       this._spectrum[i] = Math.max(0, Math.min(1, (this._spectrumRaw[i] - min) / range));
     }
 
-    this._analyser.getFloatTimeDomainData(this._waveform);
     this._computeBands();
   }
 
   // ── Private: demo synth ─────────────────────────────────────────────────────
 
   _updateDemo() {
-    this._demoTime += 1 / 60;
+    this._demoTime += 1 / V2_CONFIG.TARGET_FPS;
     const t   = this._demoTime;
     const bps = this._demoBPM / 60;
 
@@ -282,16 +268,9 @@ class V2AudioManager {
       this._spectrum[i] = this._spectrum[i] * 0.7 + Math.min(1, Math.max(0, val)) * 0.3;
     }
 
-    const wlen = this._waveform.length;
-    for (let i = 0; i < wlen; i++) {
-      const ph = (i / wlen) * Math.PI * 2;
-      this._waveform[i] = Math.max(-1, Math.min(1,
-        0.4 * bass   * Math.sin(ph * 2  + t * 6.28) +
-        0.2 * mid    * Math.sin(ph * 5  + t * 12.56) +
-        0.1 * treble * Math.sin(ph * 13 + t * 31.4) +
-        0.05 * (Math.random() * 2 - 1)
-      ));
-    }
+    // Waveform/time-domain data is not consumed by fusion.js, so it is not
+    // synthesized here. _waveform stays a zero-filled buffer; getWaveform()
+    // remains valid for a future oscilloscope layer.
 
     this._bands.sub     = Math.min(1, bass * 0.9);
     this._bands.bass    = Math.min(1, bass * 0.85 + 0.05 * Math.sin(t * 3));
@@ -337,7 +316,7 @@ class V2AudioManager {
   // ── Private: internals ──────────────────────────────────────────────────────
 
   _cleanupDemoNodes() {
-    for (const node of [this._demoOsc, this._demoLfo, this._demoLfoGain, this._demoNoise]) {
+    for (const node of [this._demoOsc, this._demoLfo, this._demoLfoGain]) {
       if (!node) continue;
       try { node.stop(); } catch (_) {}
       try { node.disconnect(); } catch (_) {}
@@ -345,7 +324,6 @@ class V2AudioManager {
     this._demoOsc     = null;
     this._demoLfo     = null;
     this._demoLfoGain = null;
-    this._demoNoise   = null;
   }
 
   _cleanupFileAudio() {
@@ -382,7 +360,6 @@ class V2AudioManager {
   _resetBeatState() {
     this._beatIntensity = 0;
     this._beatActive    = false;
-    this._beatTimestamps = [];
     this._bassHistory.fill(0);
     this._bassHistIdx   = 0;
   }
@@ -422,22 +399,9 @@ class V2AudioManager {
       this._beatActive    = true;
       this._beatIntensity = Math.min(1, bass / Math.max(threshold, 0.01));
       this._lastBeatTime  = now;
-      this._beatTimestamps.push(now);
-      if (this._beatTimestamps.length > V2_CONFIG.BPM_HISTORY) this._beatTimestamps.shift();
     } else {
       this._beatActive     = false;
       this._beatIntensity *= 0.9;
     }
-  }
-
-  getBPM() {
-    if (this._beatTimestamps.length < 4) return null;
-    const intervals = [];
-    for (let i = 1; i < this._beatTimestamps.length; i++) {
-      intervals.push(this._beatTimestamps[i] - this._beatTimestamps[i - 1]);
-    }
-    intervals.sort((a, b) => a - b);
-    const median = intervals[Math.floor(intervals.length / 2)];
-    return median > 0 ? Math.round(60000 / median) : null;
   }
 }

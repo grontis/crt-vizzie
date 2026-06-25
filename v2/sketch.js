@@ -419,6 +419,10 @@
         return;
       }
 
+      // Don't fire global shortcuts while interacting with the FX panel —
+      // otherwise typing/adjusting a control also triggers the global action.
+      if (bgFxPanel.isVisible && bgFxPanel.contains(document.activeElement)) return;
+
       switch (e.key.toUpperCase()) {
         case 'D':
           // Demo mode toggle
@@ -503,6 +507,7 @@
           // Toggle bgAscii layer (ASCII art rendering of background luma)
           V2_PARAMS.bgAsciiEnabled = !V2_PARAMS.bgAsciiEnabled;
           if (!V2_PARAMS.bgAsciiEnabled) V2_PARAMS._bgAsciiAudioAdd = 0.0;
+          if (bgFxPanel.isVisible) bgFxPanel.syncState();
           updateStatus();
           break;
 

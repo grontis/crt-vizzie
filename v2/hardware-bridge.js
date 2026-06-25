@@ -6,8 +6,9 @@
 //
 // Differences from v1:
 //   - Writes to window.V2_PARAMS / window.V2_PARAM_RANGES (not FUSION_PARAMS)
-//   - No syncFusionPanelState() call (no panel in v2 MVP)
-//   - No bgFx nested-path handling (no bgFx in v2)
+//   - No syncFusionPanelState() call (no panel in v2)
+//   - bgFx params (bgFxHueShift, bgFxSaturation, …) are first-class flat keys in
+//     V2_PARAMS — handled by the same clamp-and-write path as every other param
 //
 // Load order: after config.js, before sketch.js
 

@@ -4,7 +4,6 @@
 //
 // Usage:
 //   const bg = new V2BackgroundLayer()
-//   await bg.loadFromUrl(url)                  // load from a server path (manifest entry)
 //   await bg.loadFromFile(file)                // load from a user-selected File object
 //   bg.resample(renderer.cols, renderer.rows)  // called on init + resize
 //   bg.tick()                                  // call each frame — no-op for images, resamples video
@@ -17,7 +16,7 @@
 class V2BackgroundLayer {
 
   constructor() {
-    this._img      = new Image();
+    this._img      = null;   // set by _loadImage() on first image load
     this._video    = null;   // HTMLVideoElement when a video file is loaded
     this._source   = null;   // points to _img or _video — the canvas-drawable source
     this._canvas   = document.createElement('canvas'); // never appended to DOM
@@ -34,27 +33,6 @@ class V2BackgroundLayer {
   // ── Public API ─────────────────────────────────────────────────────────────
 
   get isLoaded() { return this._loaded; }
-
-  /**
-   * Load a background image or video from a server URL (no object URL needed).
-   * Revokes any existing object URL from a prior loadFromFile call.
-   * Extension sniffing: .mp4 / .webm / .mov / .mkv / .m4v -> video; everything else -> image.
-   * Whether a video actually plays depends on the codec inside the container.
-   * @param {string} url
-   * @returns {Promise<void>}
-   */
-  loadFromUrl(url) {
-    if (this._objURL) {
-      URL.revokeObjectURL(this._objURL);
-      this._objURL = null;
-    }
-    this._loaded = false;
-    const ext = url.split('?')[0].split('.').pop().toLowerCase();
-    if (ext === 'mp4' || ext === 'webm' || ext === 'mov' || ext === 'mkv' || ext === 'm4v') {
-      return this._loadVideo(url);
-    }
-    return this._loadImage(url);
-  }
 
   /**
    * Load a user-selected image or video File.
@@ -228,6 +206,7 @@ class V2BackgroundLayer {
       el.style.background   = 'none';
       el.appendChild(videoEl);
     } else if (imageSrc) {
+      // imageSrc is always a blob URL from URL.createObjectURL (local file) — no escaping needed
       el.style.background = `url(${imageSrc}) center / cover no-repeat`;
     }
   }

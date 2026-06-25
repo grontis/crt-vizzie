@@ -14,7 +14,7 @@ class BgFxPanel {
 
   constructor() {
     this._panel      = null;
-    this._enabledCb  = null;
+    this._checkboxes = {}; // keyed by param name (bool params)
     this._sliders    = {}; // keyed by param name
     this._readouts   = {}; // keyed by param name
 
@@ -86,7 +86,7 @@ class BgFxPanel {
     panel.appendChild(heading);
 
     // Checkbox row: bgFxEnabled
-    panel.appendChild(this._buildCheckboxRow());
+    panel.appendChild(this._buildCheckboxRow('bgFxEnabled', 'Enabled'));
 
     // Slider rows in specified panel order:
     //   1. Opacity           (bgOpacity)        — base opacity, always active when bg on
@@ -116,30 +116,50 @@ class BgFxPanel {
       panel.appendChild(this._buildSliderRow(def));
     }
 
+    // ── ASCII layer (bgAscii) — V key toggles bgAsciiEnabled ──
+    // Tunable only via hardware otherwise; surfaced here for keyboard-only setups.
+    const asciiHeading = document.createElement('h3');
+    asciiHeading.textContent = 'ASCII Layer';
+    asciiHeading.style.marginTop = '12px';
+    panel.appendChild(asciiHeading);
+
+    panel.appendChild(this._buildCheckboxRow('bgAsciiEnabled', 'Enabled'));
+
+    const asciiSliderDefs = [
+      { key: 'bgAsciiLevel',      label: 'Level',       step: 0.01, fmt: 'two' },
+      { key: 'bgAsciiAudioMult',  label: 'Audio mult',  step: 0.01, fmt: 'two' },
+      { key: 'bgAsciiRampPreset', label: 'Ramp preset', step: 1,    fmt: 'int' },
+    ];
+    for (const def of asciiSliderDefs) {
+      panel.appendChild(this._buildSliderRow(def));
+    }
+
+    panel.appendChild(this._buildCheckboxRow('bgAsciiInvert', 'Invert'));
+
     document.body.appendChild(panel);
     this._panel = panel;
   }
 
-  _buildCheckboxRow() {
+  _buildCheckboxRow(key, labelText) {
     const row = document.createElement('div');
     row.className = 'bg-fx-row';
 
     const label = document.createElement('label');
-    label.textContent = 'Enabled';
-    label.htmlFor = 'bg-fx-enabled-cb';
+    label.textContent = labelText;
+    label.htmlFor = `bg-fx-cb-${key}`;
 
     const cb = document.createElement('input');
     cb.type  = 'checkbox';
-    cb.id    = 'bg-fx-enabled-cb';
-    cb.checked = !!window.V2_PARAMS.bgFxEnabled;
+    cb.id    = `bg-fx-cb-${key}`;
+    cb.checked = !!window.V2_PARAMS[key];
 
     cb.addEventListener('change', () => {
-      window.V2_PARAMS.bgFxEnabled = cb.checked;
+      window.V2_PARAMS[key] = cb.checked;
     });
 
     row.appendChild(label);
     row.appendChild(cb);
-    this._enabledCb = cb;
+    this._checkboxes[key] = cb;
     return row;
   }
 
@@ -187,6 +207,7 @@ class BgFxPanel {
 
   _format(val, fmt) {
     switch (fmt) {
+      case 'int': return val.toFixed(0);
       case 'deg': return val.toFixed(0);
       case 'one': return val.toFixed(1);
       case 'two': return val.toFixed(2);
@@ -237,8 +258,8 @@ class BgFxPanel {
   syncState() {
     const p = window.V2_PARAMS;
 
-    if (this._enabledCb) {
-      this._enabledCb.checked = !!p.bgFxEnabled;
+    for (const key of Object.keys(this._checkboxes)) {
+      this._checkboxes[key].checked = !!p[key];
     }
 
     for (const key of Object.keys(this._sliders)) {

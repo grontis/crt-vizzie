@@ -42,7 +42,6 @@ window.V2_CONFIG = {
   BEAT_THRESHOLD:  1.25,
   BEAT_HISTORY:    43,
   BEAT_COOLDOWN:   300,       // ms minimum between beats
-  BPM_HISTORY:     8,
 
   // Character sets (used by fusion mode)
   KATAKANA: (function () {
@@ -206,7 +205,7 @@ window.V2_PARAM_RANGES = {
 
   rainSpeedMin:    { min: 0.01,  max: 0.5   },
   rainSpeedMax:    { min: 0.1,   max: 2.0   },
-  rainBeatMult:    { min: 1.0,   max: 6.0   },
+  rainBeatMult:    { min: 1.0,   max: 10.0  },
   rainTrail:       { min: 4,     max: 30    },
   rainInteract:    { min: 0,     max: 1.0   },
   rainBurnBoost:   { min: 0,     max: 0.5   },

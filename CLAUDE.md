@@ -109,7 +109,7 @@ removes this requirement.
 ### `background.js` — V2BackgroundLayer
 
 Manages a CSS `background-image` on the fixed `#v2-bg-image` div. Handles loading from a
-server URL (`loadFromUrl(url)`) or a local file (`loadFromFile(file)`). Provides `resample()`
+local file (`loadFromFile(file)`). Provides `resample()`
 which samples the current background into a luma array for use by `fusion.js`
 (background-influenced cell brightness).
 
@@ -183,6 +183,7 @@ startup screen, input wiring) and runs the `requestAnimationFrame` loop gated at
 | A | Open audio file picker |
 | B | Toggle background image visibility |
 | X | Toggle audio-reactive bg FX (filter/transform) |
+| V | Toggle bgAscii layer (ASCII-art rendering of background luma) |
 | S | Cycle scanline mode: OFF → PIXEL → CELL-GAP → SMOOTH → OFF |
 | P | Cycle phosphor preset (green → amber → blue → red → white → ...) |
 | L | Load a single background image or video from file (one-off, off-playlist) |
