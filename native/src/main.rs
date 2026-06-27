@@ -21,10 +21,12 @@
 //!   crt-vizzie-spike --core <core.so> --rom <game.z64>   # (--rom wired in at M3)
 
 mod audio_dev;
+mod config;
 mod frontend;
 mod libretro;
 mod platform;
 mod quad;
+mod renderer;
 mod sdl_gl;
 
 use std::path::PathBuf;
@@ -113,9 +115,11 @@ fn run_window(
     }
 
     // ── M3a: load the ROM and observe the core's hw-render request ────────────
+    let mut game_loaded = false;
     if let (Some(c), Some(rom_path)) = (&core, &rom) {
         match unsafe { frontend::load_game(c, rom_path) } {
             Ok(true) => {
+                game_loaded = true;
                 println!("[spike] retro_load_game OK");
                 let t = frontend::hw_context_type();
                 println!(
@@ -170,14 +174,19 @@ fn run_window(
         }
     }
 
-    // ── M5: full-screen quad that samples the game texture to the window ──────
-    let quad = match unsafe { quad::Quad::new(&gfx.gl) } {
-        Ok(q) => Some(q),
+    // ── Phase 1: the ASCII renderer (composites ASCII over the game texture) ──
+    let mut params = config::Params::default();
+    let mut ascii = match unsafe { renderer::AsciiRenderer::new(&gfx.gl) } {
+        Ok(r) => r,
         Err(e) => {
-            println!("[spike] quad shader build FAILED: {e}");
-            None
+            eprintln!("[renderer] init FAILED: {e}");
+            std::process::exit(1);
         }
     };
+    {
+        let (iw, ih) = gfx.window.size();
+        unsafe { ascii.resize(&gfx.gl, iw, ih) };
+    }
 
     // Software-frame texture: used when the core renders on the CPU (delivers pixels via
     // video_refresh) instead of into our FBO — e.g. parallel_n64's software renderer.
@@ -200,14 +209,26 @@ fn run_window(
             match event {
                 Event::Quit { .. }
                 | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'main,
+                Event::KeyDown { keycode: Some(Keycode::P), .. } => {
+                    params.phosphor_index = (params.phosphor_index + 1) % config::PHOSPHOR_ORDER.len();
+                    eprintln!("[renderer] phosphor: {}", config::PHOSPHOR_ORDER[params.phosphor_index]);
+                }
+                Event::KeyDown { keycode: Some(Keycode::S), .. } => {
+                    params.scanline_mode = (params.scanline_mode + 1) % 4;
+                    eprintln!("[renderer] scanline mode: {}", params.scanline_mode);
+                }
+                Event::KeyDown { keycode: Some(Keycode::B), .. } => {
+                    params.bg_enabled = !params.bg_enabled;
+                    eprintln!("[renderer] bg_enabled: {}", params.bg_enabled);
+                }
                 _ => {}
             }
         }
 
         let (win_w, win_h) = gfx.window.size();
 
-        // Run one core frame, handing it a clean GL slate per the libretro contract.
-        if let Some(c) = &core {
+        // Run one core frame (only once a game is loaded — running a core with no game crashes).
+        if let (Some(c), true) = (&core, game_loaded) {
             unsafe {
                 gfx.gl.bind_vertex_array(None);
                 gfx.gl.use_program(None);
@@ -222,37 +243,39 @@ fn run_window(
             }
         }
 
-        // Display: hardware FBO if the core uses hw render, else the software frame, else magenta.
+        // Pick the game texture + sampling params for whichever video path is active.
+        let (game_tex, game_sx, game_sy, game_flip) = if let Some(g) = &game {
+            // Hardware FBO: bottom-left origin → no flip.
+            let cw = frontend::cur_w();
+            let ch = frontend::cur_h();
+            let sx = if cw > 0 { cw as f32 / g.w as f32 } else { 1.0 };
+            let sy = if ch > 0 { ch as f32 / g.h as f32 } else { 1.0 };
+            (Some(g.color), sx, sy, 0.0_f32)
+        } else if let (Some(t), true) = (sw_tex, frontend::sw_ready()) {
+            // Software CPU frame: top-left origin → v-flip.
+            let (sw, sh) = frontend::sw_dims();
+            frontend::with_sw_frame(|buf| unsafe {
+                upload_sw_texture(&gfx.gl, t, sw as i32, sh as i32, frontend::pixel_format(), buf);
+            });
+            (Some(t), 1.0, 1.0, 1.0_f32)
+        } else {
+            (None, 1.0, 1.0, 0.0_f32) // no core / no frame yet → ASCII on black
+        };
+
+        // Phase 1: static test pattern stands in for fusion (Phase 2 fills these for real).
+        let n = ascii.cols() * ascii.rows();
+        let mut char_idx = vec![0u16; n];
+        let mut bright16 = vec![0u16; n];
+        let mut cga_idx = vec![0u8; n];
+        fill_static(&mut char_idx, &mut bright16, &mut cga_idx, ascii.cols(), ascii.rows());
+
         unsafe {
             gfx.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             gfx.gl.viewport(0, 0, win_w as i32, win_h as i32);
             gfx.gl.clear_color(0.0, 0.0, 0.0, 1.0);
             gfx.gl.clear(glow::COLOR_BUFFER_BIT);
-
-            if let (Some(g), Some(q)) = (&game, &quad) {
-                // Hardware path: FBO is bottom-left origin (matches GL texture v) → no flip.
-                let cw = frontend::cur_w();
-                let ch = frontend::cur_h();
-                let sx = if cw > 0 { cw as f32 / g.w as f32 } else { 1.0 };
-                let sy = if ch > 0 { ch as f32 / g.h as f32 } else { 1.0 };
-                q.draw(&gfx.gl, g.color, sx, sy, 0.0);
-            } else if let (Some(q), Some(t)) = (&quad, sw_tex) {
-                // Software path: CPU frame is top-left origin (opposite of GL texture v) → v-flip.
-                if frontend::sw_ready() {
-                    let (sw, sh) = frontend::sw_dims();
-                    let fmt = frontend::pixel_format();
-                    frontend::with_sw_frame(|buf| {
-                        upload_sw_texture(&gfx.gl, t, sw as i32, sh as i32, fmt, buf);
-                    });
-                    q.draw(&gfx.gl, t, 1.0, 1.0, 1.0);
-                } else {
-                    gfx.gl.clear_color(1.0, 0.0, 1.0, 1.0);
-                    gfx.gl.clear(glow::COLOR_BUFFER_BIT);
-                }
-            } else {
-                gfx.gl.clear_color(1.0, 0.0, 1.0, 1.0);
-                gfx.gl.clear(glow::COLOR_BUFFER_BIT);
-            }
+            ascii.upload(&gfx.gl, &char_idx, &bright16, &cga_idx);
+            ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h);
         }
 
         gfx.window.gl_swap_window();
@@ -268,6 +291,45 @@ fn run_window(
         }
     }
     std::process::exit(0)
+}
+
+/// Phase 1 static test pattern — exercises every shader path (glyphs, phosphor ramp, CGA,
+/// empty cells) before fusion exists (Phase 2 replaces this).
+fn fill_static(char_idx: &mut [u16], bright16: &mut [u16], cga_idx: &mut [u8], cols: usize, rows: usize) {
+    let n = cols * rows;
+    // Default: mid-bright phosphor with a visible glyph.
+    for i in 0..n {
+        char_idx[i] = 3;
+        bright16[i] = 32767;
+        cga_idx[i] = 0;
+    }
+    // Row 0: fully bright, varied glyphs across the atlas.
+    for c in 0..cols {
+        char_idx[c] = (c % 30 + 10) as u16;
+        bright16[c] = 65535;
+        cga_idx[c] = 0;
+    }
+    // Rows 1-4, col 0: brightness ramp (tests the phosphor 3-stop).
+    for r in 1..rows.min(5) {
+        let i = r * cols;
+        char_idx[i] = 5;
+        bright16[i] = (r as f32 / 4.0 * 65535.0) as u16;
+        cga_idx[i] = 0;
+    }
+    // Rows 5-8: CGA diagonal band (tests all 15 palette entries).
+    for r in 5..rows.min(9) {
+        for c in 0..cols {
+            let i = r * cols + c;
+            cga_idx[i] = ((r + c) % 15 + 1) as u8;
+            bright16[i] = 49151;
+            char_idx[i] = 5;
+        }
+    }
+    // Col 0, rows 9+: empty cells (tests the empty-cell fast path).
+    for r in 9..rows {
+        char_idx[r * cols] = 0;
+        bright16[r * cols] = 0;
+    }
 }
 
 /// Upload a software (CPU) frame to `tex`, choosing the GL format from the libretro pixel format.
