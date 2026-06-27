@@ -1,0 +1,9 @@
+# CMake 4.0 removed compatibility with cmake_minimum_required(VERSION < 3.5). The SDL2 source
+# that the bundled `sdl2-sys` compiles on Windows still declares an older minimum, so its
+# configure step is rejected. This env var tells CMake to assume a 3.5 policy floor and configure
+# anyway — the documented migration workaround.
+#
+# Harmless elsewhere: Linux/Pi use the system SDL2 (libsdl2-dev) and never invoke CMake from this
+# build, so the variable is simply ignored there.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

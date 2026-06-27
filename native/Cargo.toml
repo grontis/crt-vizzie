@@ -1,0 +1,37 @@
+[package]
+name = "crt-vizzie-spike"
+version = "0.0.0"
+edition = "2021"
+description = "Phase 0 de-risking spike: N64 libretro core -> frontend-owned GLES3 texture -> screen"
+publish = false
+
+[[bin]]
+name = "crt-vizzie-spike"
+path = "src/main.rs"
+
+[dependencies]
+# Thin GL/GLES bindings; entry points are loaded at runtime via SDL's proc-address loader.
+glow = "0.13"
+
+# dlopen the libretro core (.so / .dll / .dylib) and resolve its symbols.
+libloading = "0.8"
+
+# M2+ ONLY (env callback + hw-render handshake): bring in authoritative libretro
+# constants/structs rather than transcribing libretro.h by hand. Uncomment and pin a
+# real version with `cargo add rust-libretro-sys` when you start M2.
+# rust-libretro-sys = "0.2"
+
+# Windowing + GLES3 context.
+# Windows: build SDL2 from source and static-link it (needs cmake + the MSVC C++ build
+#   tools) so there's no SDL2.dll to ship.
+# Linux/Pi: link the system SDL2 (libsdl2-dev) — faster and conventional there.
+[target.'cfg(windows)'.dependencies]
+sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
+
+[target.'cfg(not(windows))'.dependencies]
+sdl2 = "0.37"
+
+[profile.dev]
+# A fully-unoptimized core runs unbearably slowly; opt-level 1 keeps emulation usable
+# while preserving fast incremental builds for the frontend code.
+opt-level = 1

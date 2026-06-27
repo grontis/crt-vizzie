@@ -1,0 +1,9 @@
+/target
+Cargo.lock
+# Never commit ROMs or cores
+*.z64
+*.n64
+*.v64
+*.so
+*.dll
+*.dylib
