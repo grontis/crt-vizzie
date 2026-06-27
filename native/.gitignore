@@ -7,3 +7,5 @@ Cargo.lock
 *.so
 *.dll
 *.dylib
+# mupen64plus writes a large ROM-database .ini at runtime — generated artifact, not source
+Mupen64plus/

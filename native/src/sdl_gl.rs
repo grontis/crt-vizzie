@@ -60,6 +60,14 @@ impl Gfx {
             glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _)
         };
 
+        // Default UNPACK_ALIGNMENT is 4, which mis-strides any R8/16-bit texture whose row byte
+        // width isn't a multiple of 4 (e.g. a 35-wide R8 cell-data row → sheared upload + OOB read).
+        // Set it once globally to 1 so every tightly-packed upload is read correctly.
+        unsafe {
+            use glow::HasContext;
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        }
+
         let event_pump = sdl.event_pump()?;
 
         Ok(Gfx {

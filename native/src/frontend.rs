@@ -30,16 +30,21 @@ static HW_ACCEPTED: AtomicBool = AtomicBool::new(false);
 static SYS_DIR: OnceLock<CString> = OnceLock::new();
 // The core reads the ROM throughout emulation, so the frontend must keep it alive for the whole
 // game session (not just across load_game). Process-lifetime statics do that.
+// NOTE: OnceLock means a second load_game would silently keep the FIRST ROM — single-load only.
 static ROM_DATA: OnceLock<Vec<u8>> = OnceLock::new();
 static ROM_PATH: OnceLock<CString> = OnceLock::new();
 
 // Software-render path: cores that deliver CPU pixel buffers via video_refresh (e.g. parallel_n64,
 // and every 2D core) instead of rendering into our FBO.
-static PIXEL_FORMAT: AtomicU32 = AtomicU32::new(1); // 0=0RGB1555, 1=XRGB8888, 2=RGB565
-static SW_W: AtomicU32 = AtomicU32::new(0);
-static SW_H: AtomicU32 = AtomicU32::new(0);
-static SW_READY: AtomicBool = AtomicBool::new(false);
-static SW_BUF: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+// Default is 0RGB1555 — the libretro spec default before any SET_PIXEL_FORMAT (NOT XRGB8888).
+static PIXEL_FORMAT: AtomicU32 = AtomicU32::new(0); // 0=0RGB1555, 1=XRGB8888, 2=RGB565
+// Dims + bytes live under ONE lock so an off-thread resolution change can't tear them apart.
+struct SwFrame {
+    w: u32,
+    h: u32,
+    data: Vec<u8>,
+}
+static SW_FRAME: Mutex<SwFrame> = Mutex::new(SwFrame { w: 0, h: 0, data: Vec::new() });
 
 fn sys_dir_ptr() -> *const c_char {
     // The core may read/write system + save files here; "." (cwd) is fine for the spike.
@@ -124,19 +129,14 @@ pub fn cur_h() -> u32 {
 pub fn pixel_format() -> u32 {
     PIXEL_FORMAT.load(Ordering::Acquire)
 }
-pub fn sw_ready() -> bool {
-    SW_READY.load(Ordering::Acquire)
-}
-pub fn sw_dims() -> (u32, u32) {
-    (SW_W.load(Ordering::Acquire), SW_H.load(Ordering::Acquire))
-}
-/// Run `f` with the latest tightly-packed software frame bytes, if any.
-pub fn with_sw_frame<R>(f: impl FnOnce(&[u8]) -> R) -> Option<R> {
-    let buf = SW_BUF.lock().ok()?;
-    if buf.is_empty() {
+/// Run `f` with the latest software frame — dimensions and tightly-packed bytes captured under one
+/// lock so they can't disagree. Returns None if no software frame has arrived yet.
+pub fn with_sw_frame<R>(f: impl FnOnce(u32, u32, &[u8]) -> R) -> Option<R> {
+    let frame = SW_FRAME.lock().ok()?;
+    if frame.data.is_empty() {
         None
     } else {
-        Some(f(&buf))
+        Some(f(frame.w, frame.h, &frame.data))
     }
 }
 
@@ -278,17 +278,16 @@ unsafe extern "C" fn video_refresh(data: *const c_void, w: c_uint, h: c_uint, pi
     let fmt = PIXEL_FORMAT.load(Ordering::Acquire);
     let bpp = if fmt == 1 { 4usize } else { 2usize };
     let row_bytes = w as usize * bpp;
-    if let Ok(mut buf) = SW_BUF.lock() {
-        buf.clear();
-        buf.reserve(row_bytes * h as usize);
+    if let Ok(mut f) = SW_FRAME.lock() {
+        f.w = w;
+        f.h = h;
+        f.data.clear();
+        f.data.reserve(row_bytes * h as usize);
         let src = data as *const u8;
         for row in 0..h as usize {
             let row_ptr = src.add(row * pitch);
-            buf.extend_from_slice(std::slice::from_raw_parts(row_ptr, row_bytes));
+            f.data.extend_from_slice(std::slice::from_raw_parts(row_ptr, row_bytes));
         }
-        SW_W.store(w, Ordering::Release);
-        SW_H.store(h, Ordering::Release);
-        SW_READY.store(true, Ordering::Release);
     }
 }
 

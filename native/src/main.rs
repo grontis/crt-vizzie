@@ -25,7 +25,6 @@ mod config;
 mod frontend;
 mod libretro;
 mod platform;
-mod quad;
 mod renderer;
 mod sdl_gl;
 
@@ -200,6 +199,14 @@ fn run_window(
         t
     };
 
+    // Phase 1 static test pattern (fusion stand-in). Built ONCE — Phase 2 will fill these in-place
+    // each frame; the renderer is architected for no per-frame allocations.
+    let cell_count = ascii.cols() * ascii.rows();
+    let mut char_idx = vec![0u16; cell_count];
+    let mut bright16 = vec![0u16; cell_count];
+    let mut cga_idx = vec![0u8; cell_count];
+    fill_static(&mut char_idx, &mut bright16, &mut cga_idx, ascii.cols(), ascii.rows());
+
     // ── M4 + M5 loop: run the core, then display the hardware FBO or the software frame ──
     'main: loop {
         let events: Vec<_> = gfx.event_pump.poll_iter().collect();
@@ -251,23 +258,19 @@ fn run_window(
             let sx = if cw > 0 { cw as f32 / g.w as f32 } else { 1.0 };
             let sy = if ch > 0 { ch as f32 / g.h as f32 } else { 1.0 };
             (Some(g.color), sx, sy, 0.0_f32)
-        } else if let (Some(t), true) = (sw_tex, frontend::sw_ready()) {
-            // Software CPU frame: top-left origin → v-flip.
-            let (sw, sh) = frontend::sw_dims();
-            frontend::with_sw_frame(|buf| unsafe {
-                upload_sw_texture(&gfx.gl, t, sw as i32, sh as i32, frontend::pixel_format(), buf);
+        } else if let Some(t) = sw_tex {
+            // Software CPU frame: top-left origin → v-flip. Dims + bytes captured under one lock.
+            let uploaded = frontend::with_sw_frame(|w, h, buf| unsafe {
+                upload_sw_texture(&gfx.gl, t, w as i32, h as i32, frontend::pixel_format(), buf);
             });
-            (Some(t), 1.0, 1.0, 1.0_f32)
+            if uploaded.is_some() {
+                (Some(t), 1.0, 1.0, 1.0_f32)
+            } else {
+                (None, 1.0, 1.0, 0.0_f32) // no software frame yet → ASCII on black
+            }
         } else {
             (None, 1.0, 1.0, 0.0_f32) // no core / no frame yet → ASCII on black
         };
-
-        // Phase 1: static test pattern stands in for fusion (Phase 2 fills these for real).
-        let n = ascii.cols() * ascii.rows();
-        let mut char_idx = vec![0u16; n];
-        let mut bright16 = vec![0u16; n];
-        let mut cga_idx = vec![0u8; n];
-        fill_static(&mut char_idx, &mut bright16, &mut cga_idx, ascii.cols(), ascii.rows());
 
         unsafe {
             gfx.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
@@ -342,6 +345,9 @@ unsafe fn upload_sw_texture(
     buf: &[u8],
 ) {
     use glow::HasContext;
+    // TODO(review,pi): glow::BGRA is NOT a valid client format on native GLES3 (the Pi). On GLES3,
+    // upload as RGBA and swap R<->B via texture swizzle (TEXTURE_SWIZZLE_R/B) under cfg(not(windows)).
+    // This path works on Windows desktop GL only.
     gl.bind_texture(glow::TEXTURE_2D, Some(tex));
     match fmt {
         // XRGB8888: native u32 0xFFRRGGBB → little-endian bytes B,G,R,X → BGRA8.
@@ -393,6 +399,9 @@ unsafe fn build_game_fbo(gl: &glow::Context, w: i32, h: i32) -> Result<GameFbo, 
         glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color), 0,
     );
 
+    // TODO(review,pi): only DEPTH24 is attached. If a core sets hw.stencil=true (GLideN64 can, for
+    // some N64 framebuffer effects), switch to DEPTH24_STENCIL8 + DEPTH_STENCIL_ATTACHMENT.
+    // mupen64plus ran with stencil=false, so this is latent.
     let depth = gl.create_renderbuffer()?;
     gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
     gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, w, h);
@@ -401,9 +410,14 @@ unsafe fn build_game_fbo(gl: &glow::Context, w: i32, h: i32) -> Result<GameFbo, 
     );
 
     let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
-    gl.bind_framebuffer(glow::FRAMEBUFFER, None);
     if status != glow::FRAMEBUFFER_COMPLETE {
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         return Err(format!("framebuffer incomplete: status=0x{status:X}"));
     }
+    // Clear the new color texture so the first frames (before the core renders) show black, not
+    // uninitialized garbage — cur_w/cur_h are 0 until the first video_refresh (full-FBO sample).
+    gl.clear_color(0.0, 0.0, 0.0, 1.0);
+    gl.clear(glow::COLOR_BUFFER_BIT);
+    gl.bind_framebuffer(glow::FRAMEBUFFER, None);
     Ok(GameFbo { fbo, color, w, h })
 }
