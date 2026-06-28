@@ -68,6 +68,22 @@ pub struct Params {
     pub idle_rain_floor:   f32,
     /// Wave brightness floor at full idle (wave dims rather than disappearing). Default: 0.20.
     pub idle_wave_dim:     f32,
+
+    // ── Bass-vibe layer (native-only) ─────────────────────────────────────────
+    /// Smoothed bass level must exceed this to trigger vibe patches. Default: 0.45.
+    pub bass_vibe_threshold:   f32,
+    /// Minimum gap between vibe-patch bursts in ms (rate-limits punchy spawning). Default: 120.0.
+    pub bass_vibe_cooldown_ms: f32,
+    /// Maximum number of new patches spawned per burst. Default: 4.
+    pub bass_vibe_patches:     usize,
+    /// Patch lifetime in ticks (30 Hz; patches fade then vanish). Default: 6.0.
+    pub bass_vibe_life:        f32,
+    /// Minimum patch width/height in cells. Default: 2.
+    pub bass_vibe_size_min:    usize,
+    /// Maximum patch width/height in cells. Default: 6.
+    pub bass_vibe_size_max:    usize,
+    /// Block brightness scale applied to patch cells (1.0 = full). Default: 1.0.
+    pub bass_vibe_brightness:  f32,
 }
 
 impl Default for Params {
@@ -137,6 +153,15 @@ impl Default for Params {
             idle_active_gate: 0.15,
             idle_rain_floor:  0.04,
             idle_wave_dim:    0.20,
+
+            // Bass-vibe (native-only)
+            bass_vibe_threshold:   0.45,
+            bass_vibe_cooldown_ms: 120.0,
+            bass_vibe_patches:     4,
+            bass_vibe_life:        6.0,
+            bass_vibe_size_min:    2,
+            bass_vibe_size_max:    6,
+            bass_vibe_brightness:  1.0,
         }
     }
 }
@@ -299,6 +324,15 @@ mod tests {
         assert_eq!(p.idle_active_gate, 0.15_f32, "idleActiveGate");
         assert_eq!(p.idle_rain_floor,  0.04_f32, "idleRainFloor");
         assert_eq!(p.idle_wave_dim,    0.20_f32, "idleWaveDim");
+
+        // Bass-vibe layer (native-only — no JS reference).
+        assert_eq!(p.bass_vibe_threshold,   0.45_f32,  "bassVibeThreshold");
+        assert_eq!(p.bass_vibe_cooldown_ms, 120.0_f32, "bassVibeCooldownMs");
+        assert_eq!(p.bass_vibe_patches,     4_usize,   "bassVibePatches");
+        assert_eq!(p.bass_vibe_life,        6.0_f32,   "bassVibeLife");
+        assert_eq!(p.bass_vibe_size_min,    2_usize,   "bassVibeSizeMin");
+        assert_eq!(p.bass_vibe_size_max,    6_usize,   "bassVibeSizeMax");
+        assert_eq!(p.bass_vibe_brightness,  1.0_f32,   "bassVibeBrightness");
     }
 
     /// KATAKANA must have exactly 121 entries: 96 katakana (U+30A0..=U+30FF) +

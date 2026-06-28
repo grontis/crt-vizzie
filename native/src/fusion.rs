@@ -22,6 +22,19 @@ struct PulseWave {
     color_base: u8,
 }
 
+/// Active bass-vibration patch (native-only).
+/// Fills a rectangular zone with randomly re-chosen block glyphs every tick
+/// to simulate physical rumble/vibration. Fades over its lifetime then vanishes.
+struct VibePatch {
+    x:        usize,  // left column of the rect
+    y:        usize,  // top row
+    w:        usize,  // width in cells
+    h:        usize,  // height in cells
+    life:     f32,    // ticks remaining (decremented by retain_mut at end of each tick)
+    life_max: f32,    // initial life — used to compute fade fraction
+    intensity: f32,   // bass_level captured at spawn time
+}
+
 /// Audio data consumed by `Fusion::update`. Built in `main.rs` each 30 Hz tick.
 pub struct AudioFrame<'a> {
     pub spectrum:       &'a [f32],
@@ -32,6 +45,10 @@ pub struct AudioFrame<'a> {
     /// When `false`, the calm-idle activity envelope is forced to 1.0 (demo stays lively).
     pub live:           bool,
 }
+
+/// Block-shade glyph palette for the bass-vibe layer (lightest → heaviest).
+/// All four chars are present in GLI_CHARS and therefore in the baked atlas.
+const VIBE_BLOCKS: &[char] = &['░', '▒', '▓', '█'];
 
 // ── Free helper functions (avoid borrowing conflicts in update) ───────────────
 
@@ -280,6 +297,11 @@ pub struct Fusion {
 
     // calm-idle activity envelope (native-only; 0 = idle, 1 = fully lively)
     activity: f32,
+
+    // bass-vibe layer (native-only)
+    bass_level:    f32,           // smoothed (sub+bass)/2 signal; gates vibe spawns
+    vibe_patches:  Vec<VibePatch>,
+    vibe_cooldown: f32,           // ms until next burst is allowed (mirrors beat clock idiom)
 }
 
 impl Fusion {
@@ -344,6 +366,7 @@ impl Fusion {
             now_ms: 0.0, last_beat_ms: 0.0, beat_interval: 600.0, prev_beat_active: false,
             rng, warned_missing,
             activity: 0.0,
+            bass_level: 0.0, vibe_patches: Vec::new(), vibe_cooldown: 0.0,
         }
     }
 
@@ -397,6 +420,11 @@ impl Fusion {
 
         // Reset calm-idle activity envelope
         self.activity = 0.0;
+
+        // Reset bass-vibe layer
+        self.bass_level    = 0.0;
+        self.vibe_patches.clear();
+        self.vibe_cooldown = 0.0;
     }
 
     /// Current calm-idle activity level in [0, 1].
@@ -455,6 +483,53 @@ impl Fusion {
         {
             eprintln!("[idledbg] target={:.3} activity={:.3} beat_int={:.2}",
                 activity_target, activity, audio.beat_intensity);
+        }
+
+        // ── Bass level (smoothed; drives vibe patch spawning) ─────────────────
+        // Computed unconditionally — not gated by audio.live — so demo mode
+        // (DevAudioSource with synthetic bands) can also trigger patches.
+        let bass_raw = (audio.bands.sub + audio.bands.bass) * 0.5;
+        self.bass_level = self.bass_level * 0.6 + bass_raw * 0.4;
+
+        // ── Bass-vibe spawn logic ─────────────────────────────────────────────
+        let tick_ms = 1000.0_f32 / 30.0;
+        self.vibe_cooldown -= tick_ms;
+        if self.bass_level >= params.bass_vibe_threshold && self.vibe_cooldown <= 0.0 {
+            self.vibe_cooldown = params.bass_vibe_cooldown_ms;
+            let over = (self.bass_level - params.bass_vibe_threshold).clamp(0.0, 1.0);
+            let n_burst = (1 + (over * params.bass_vibe_patches as f32) as usize)
+                .min(params.bass_vibe_patches);
+            // Hard cap: never exceed 24 total live patches to avoid runaway.
+            let available = 24_usize.saturating_sub(self.vibe_patches.len());
+            let n_spawn = n_burst.min(available);
+            let size_span = params.bass_vibe_size_max
+                .saturating_sub(params.bass_vibe_size_min) + 1;
+            for _ in 0..n_spawn {
+                let w = (params.bass_vibe_size_min
+                    + (self.rng.rand() * size_span as f32) as usize)
+                    .min(cols);
+                let h = (params.bass_vibe_size_min
+                    + (self.rng.rand() * size_span as f32) as usize)
+                    .min(rows);
+                let max_x = cols.saturating_sub(w);
+                let max_y = rows.saturating_sub(h);
+                let x = if max_x > 0 {
+                    (self.rng.rand() * max_x as f32) as usize % max_x
+                } else { 0 };
+                let y = if max_y > 0 {
+                    (self.rng.rand() * max_y as f32) as usize % max_y
+                } else { 0 };
+                // Final safety clamp (no-op under normal conditions).
+                let w = w.min(cols.saturating_sub(x));
+                let h = h.min(rows.saturating_sub(y));
+                if w == 0 || h == 0 { continue; }
+                self.vibe_patches.push(VibePatch {
+                    x, y, w, h,
+                    life:      params.bass_vibe_life,
+                    life_max:  params.bass_vibe_life,
+                    intensity: self.bass_level,
+                });
+            }
         }
 
         let beat_rising_edge = audio.beat_active && !self.prev_beat_active;
@@ -934,6 +1009,52 @@ impl Fusion {
                 }
             }
         }
+
+        // ── Phase 4f: Bass-vibe patches (final layer — overwrites everything) ─
+        // Each active patch fills its rect with block glyphs re-randomized every
+        // tick to create a buzzing/vibration effect.  Renders last so patches
+        // dominate any underlying layer while they are alive.
+        //
+        // Index-based loop (not iter_mut) so we can borrow self.rng and the output
+        // slices without holding a simultaneous borrow on self.vibe_patches —
+        // the same pattern used by the pulse_waves render above.
+        let n_vibe = self.vibe_patches.len();
+        for pi in 0..n_vibe {
+            // Copy all patch fields to locals; releases the borrow on vibe_patches
+            // before any mutable field is touched.
+            let (px, py, pw, ph, life, life_max, intensity) = {
+                let p = &self.vibe_patches[pi];
+                (p.x, p.y, p.w, p.h, p.life, p.life_max, p.intensity)
+            };
+            let frac = (life / life_max).clamp(0.0, 1.0);
+            let amt  = intensity * frac;
+
+            for row in py..(py + ph).min(rows) {
+                for col in px..(px + pw).min(cols) {
+                    let idx  = row * cols + col;
+                    // Random shade biased toward heavier blocks when amt is high.
+                    let r    = self.rng.rand();
+                    let shade = (r * 0.5 + amt * 0.5).clamp(0.0, 1.0);
+                    let bi   = ((shade * (VIBE_BLOCKS.len() - 1) as f32).round() as usize)
+                        .min(VIBE_BLOCKS.len() - 1);
+                    let ch   = VIBE_BLOCKS[bi];
+                    let ch_i = char_idx_or_warn(
+                        &self.char_map, &mut self.warned_missing, ch,
+                    );
+                    let brightness = (amt * params.bass_vibe_brightness).min(1.0);
+                    // cga 0 → use phosphor color (not a CGA palette override)
+                    set_cell_by_idx(
+                        &mut self.char_idx, &mut self.bright16, &mut self.cga_idx,
+                        idx, ch_i, brightness, 0,
+                    );
+                }
+            }
+        }
+        // Decrement life and prune expired patches (mirrors pulse_waves drain).
+        self.vibe_patches.retain_mut(|p| {
+            p.life -= 1.0;
+            p.life > 0.0
+        });
     }
 }
 
@@ -1281,6 +1402,172 @@ mod tests {
             fusion.glitch_seed_timer, glitch_timer_before,
             "glitch_seed_timer must not advance while resting (was {glitch_timer_before}, now {})",
             fusion.glitch_seed_timer
+        );
+    }
+
+    // ── Bass-vibe tests ───────────────────────────────────────────────────────
+
+    /// With low bass (all bands 0.1) the smoothed bass_level never reaches
+    /// bass_vibe_threshold (0.45), so no patches should ever spawn.
+    #[test]
+    fn bass_vibe_no_spawn_below_threshold() {
+        let charset = make_charset();
+        let params  = crate::config::Params::default();
+        // Confirm threshold is above what low bands produce
+        assert!(params.bass_vibe_threshold > 0.1,
+            "sanity: threshold must be above 0.1 for this test to be meaningful");
+
+        let mut fusion = Fusion::new(20, 10, &charset);
+        let spectrum   = vec![0.1f32; 512];
+        let bands      = crate::audio_dev::Bands {
+            sub: 0.1, bass: 0.1, low_mid: 0.1, mid: 0.1, high_mid: 0.1, treble: 0.1,
+        };
+
+        for _ in 0..30 {
+            let frame = AudioFrame {
+                spectrum: &spectrum, bands,
+                beat_active: false, beat_intensity: 0.0, live: false,
+            };
+            fusion.update(&frame, 20, 10, &params);
+        }
+
+        // bass_raw = (0.1 + 0.1) * 0.5 = 0.1; smoothed steady-state = 0.1 << 0.45
+        assert!(
+            fusion.vibe_patches.is_empty(),
+            "no patches should spawn when bass is below threshold, got {}",
+            fusion.vibe_patches.len()
+        );
+    }
+
+    /// With heavy bass (sub=1.0, bass=1.0) patches should spawn quickly and at
+    /// least one block glyph (░▒▓█) should appear in the composite char buffer.
+    #[test]
+    fn bass_vibe_spawns_on_heavy_bass_and_writes_block_glyphs() {
+        let charset  = make_charset();
+        let params   = crate::config::Params::default();
+        let cols     = 20usize;
+        let rows     = 10usize;
+        let mut fusion = Fusion::new(cols, rows, &charset);
+
+        // Build the set of atlas indices that correspond to block glyphs.
+        let block_atlas: std::collections::HashSet<u16> = charset.iter().enumerate()
+            .filter_map(|(i, s)| {
+                let ch = s.chars().next()?;
+                if ['░', '▒', '▓', '█'].contains(&ch) { Some(i as u16) } else { None }
+            })
+            .collect();
+        assert!(!block_atlas.is_empty(), "block chars must be present in the test charset");
+
+        let spectrum = vec![1.0f32; 512];
+        let bands    = crate::audio_dev::Bands {
+            sub: 1.0, bass: 1.0, low_mid: 0.5, mid: 0.5, high_mid: 0.2, treble: 0.2,
+        };
+
+        // Run a few heavy-bass ticks (bass_level converges toward 1.0 fast with α=0.4).
+        for _ in 0..5 {
+            let frame = AudioFrame {
+                spectrum: &spectrum, bands,
+                beat_active: false, beat_intensity: 0.0, live: false,
+            };
+            fusion.update(&frame, cols, rows, &params);
+        }
+
+        assert!(
+            !fusion.vibe_patches.is_empty(),
+            "heavy bass should have spawned at least one vibe patch"
+        );
+
+        // At least one cell in the composite must hold a block-glyph atlas index.
+        let found_block = fusion.char_idx.iter().any(|&idx| block_atlas.contains(&idx));
+        assert!(
+            found_block,
+            "at least one block glyph (░▒▓█) must be written into char_idx after heavy bass"
+        );
+    }
+
+    /// After a heavy-bass burst, returning to silence for enough ticks must drain
+    /// all patches (life decrements to 0 → retain_mut removes them).
+    #[test]
+    fn bass_vibe_patches_expire_on_silence() {
+        let charset  = make_charset();
+        let params   = crate::config::Params::default();
+        let cols     = 20usize;
+        let rows     = 10usize;
+        let mut fusion = Fusion::new(cols, rows, &charset);
+
+        let heavy_spec = vec![1.0f32; 512];
+        let heavy_bands = crate::audio_dev::Bands {
+            sub: 1.0, bass: 1.0, low_mid: 0.5, mid: 0.5, high_mid: 0.2, treble: 0.2,
+        };
+        let silent_spec  = vec![0.0f32; 512];
+        let silent_bands = crate::audio_dev::Bands::default();
+
+        // Trigger at least one spawn burst.
+        for _ in 0..3 {
+            let frame = AudioFrame {
+                spectrum: &heavy_spec, bands: heavy_bands,
+                beat_active: false, beat_intensity: 0.0, live: false,
+            };
+            fusion.update(&frame, cols, rows, &params);
+        }
+        assert!(!fusion.vibe_patches.is_empty(), "sanity: heavy bass should have spawned patches");
+
+        // Silence for bass_vibe_life (6) + a few extra ticks — all patches must have expired.
+        let drain_ticks = params.bass_vibe_life as usize + 5;
+        for _ in 0..drain_ticks {
+            let frame = AudioFrame {
+                spectrum: &silent_spec, bands: silent_bands,
+                beat_active: false, beat_intensity: 0.0, live: false,
+            };
+            fusion.update(&frame, cols, rows, &params);
+        }
+
+        assert!(
+            fusion.vibe_patches.is_empty(),
+            "all patches must have expired after {} silence ticks; {} remain",
+            drain_ticks, fusion.vibe_patches.len()
+        );
+    }
+
+    /// With heavy bass every tick for 10 ticks, the cooldown (120 ms ≈ 3.6 ticks)
+    /// must prevent a burst on every tick.  The live-patch count after 10 ticks
+    /// must be well below the uncooled maximum of 10 × bass_vibe_patches = 40.
+    #[test]
+    fn bass_vibe_cooldown_rate_limits_spawns() {
+        let charset  = make_charset();
+        let params   = crate::config::Params::default();
+        let cols     = 40usize;
+        let rows     = 20usize;
+        let mut fusion = Fusion::new(cols, rows, &charset);
+
+        let spectrum = vec![1.0f32; 512];
+        let bands    = crate::audio_dev::Bands {
+            sub: 1.0, bass: 1.0, low_mid: 0.5, mid: 0.5, high_mid: 0.2, treble: 0.2,
+        };
+
+        for _ in 0..10 {
+            let frame = AudioFrame {
+                spectrum: &spectrum, bands,
+                beat_active: false, beat_intensity: 0.0, live: false,
+            };
+            fusion.update(&frame, cols, rows, &params);
+        }
+
+        // tick_ms ≈ 33.33 ms; cooldown 120 ms → burst fires every ~3.6 ticks.
+        // In 10 ticks: ≤3 bursts.  Patches from early bursts will have expired
+        // by tick 10 (life=6), leaving only the most recent burst alive.
+        // Assert well below the uncooled ceiling of 10 × 4 = 40.
+        let uncooled_ceiling = 10 * params.bass_vibe_patches;
+        assert!(
+            fusion.vibe_patches.len() < uncooled_ceiling,
+            "cooldown should bound live patches to <<{uncooled_ceiling}; got {}",
+            fusion.vibe_patches.len()
+        );
+        // Also confirm that at least one patch did spawn (bass was genuinely heavy).
+        // (The last burst should still be alive since life=6 and we just ran 10 ticks.)
+        assert!(
+            !fusion.vibe_patches.is_empty(),
+            "heavy bass for 10 ticks should have left at least one live patch"
         );
     }
 }
