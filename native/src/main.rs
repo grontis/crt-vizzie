@@ -6,6 +6,7 @@ mod audio_dev;
 mod config;
 mod frontend;
 mod fusion;
+mod hw_input;
 mod libretro;
 mod platform;
 mod renderer;
@@ -252,6 +253,8 @@ fn run_window(
     // Phase 3: --demo-mode → synthetic source; else open default cpal input, falling back to
     // a silent (blank/idle) source if no device is available.
     let mut audio = audio::new_source(demo);
+    // Phase 4: GPIO knobs/buttons/LEDs on Pi 5; no-op DevHardwareInput stub elsewhere.
+    let mut hw = hw_input::new_hardware_input();
     let charset: Vec<String> = ascii.charset().to_vec();  // clone once at startup
     let mut fusion = fusion::Fusion::new(ascii.cols(), ascii.rows(), &charset);
 
@@ -307,11 +310,17 @@ fn run_window(
                 // 1. Advance audio (cpal capture or synthetic fallback).
                 audio.update();
 
-                // 2. Chroma beat envelope (mirrors sketch.js _chromaBeatCurrent update).
+                // 2. Hardware input: read knobs → write params; drain button events → invoke
+                //    actions; drive LED outputs from current band levels. Runs after audio.update()
+                //    so LEDs see the freshest bands, and before fusion.update() so param changes
+                //    land in the same tick.
+                hw.poll(&mut params, audio.bands());
+
+                // 3. Chroma beat envelope (mirrors sketch.js _chromaBeatCurrent update).
                 params.chroma_beat_current = params.chroma_beat_current * 0.85
                     + audio.beat_intensity() * params.chroma_beat * 0.15;
 
-                // 3. Build the audio frame and run fusion.
+                // 4. Build the audio frame and run fusion.
                 let frame = fusion::AudioFrame {
                     spectrum:       audio.spectrum(),
                     bands:          audio.bands(),

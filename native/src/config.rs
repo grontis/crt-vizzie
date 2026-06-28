@@ -69,6 +69,13 @@ pub struct Params {
     /// Wave brightness floor at full idle (wave dims rather than disappearing). Default: 0.20.
     pub idle_wave_dim:     f32,
 
+    // ── Hardware input (native-only) ──────────────────────────────────────────
+    /// First-order low-pass alpha for knob smoothing. Range: 0.0 (frozen) – 1.0 (passthrough).
+    /// Default 0.35: lightly smooths ADC noise at 30 Hz (~4 frames to reach 95 % of a step)
+    /// without feeling laggy. Clamped to [HW_KNOB_ALPHA_MIN, HW_KNOB_ALPHA_MAX] in hw_input.rs
+    /// before use; adjust via hardware-bridge debug builds or future config file.
+    pub hw_knob_alpha: f32,
+
     // ── Bass-vibe layer (native-only) ─────────────────────────────────────────
     /// Smoothed bass level must exceed this to trigger vibe patches. Default: 0.45.
     pub bass_vibe_threshold:   f32,
@@ -146,6 +153,9 @@ impl Default for Params {
             glitch_beat_seed_min: 12,
             glitch_intensity_scale: 1.5,
 
+            // Hardware input (native-only)
+            hw_knob_alpha: 0.35,
+
             // Calm-idle (native-only)
             idle_noise_floor: 0.06,
             activity_attack:  0.35,
@@ -218,6 +228,12 @@ pub const BEAT_THRESHOLD: f32 = 1.25;
 pub const BEAT_HISTORY: usize = 43;
 /// Minimum gap between beats in milliseconds. Matches V2_CONFIG.BEAT_COOLDOWN.
 pub const BEAT_COOLDOWN_MS: f32 = 300.0;
+
+// ── Hardware input constants ─────────────────────────────────────────────────
+
+/// Valid range for `Params::hw_knob_alpha`. Clamped in `hw_input.rs` before use.
+pub const HW_KNOB_ALPHA_MIN: f32 = 0.0;
+pub const HW_KNOB_ALPHA_MAX: f32 = 1.0;
 
 // ── Fusion constants (verbatim from V2_CONFIG) ───────────────────────────────
 
@@ -324,6 +340,9 @@ mod tests {
         assert_eq!(p.idle_active_gate, 0.15_f32, "idleActiveGate");
         assert_eq!(p.idle_rain_floor,  0.04_f32, "idleRainFloor");
         assert_eq!(p.idle_wave_dim,    0.20_f32, "idleWaveDim");
+
+        // Hardware input (native-only — no JS reference).
+        assert_eq!(p.hw_knob_alpha, 0.35_f32, "hwKnobAlpha");
 
         // Bass-vibe layer (native-only — no JS reference).
         assert_eq!(p.bass_vibe_threshold,   0.45_f32,  "bassVibeThreshold");

@@ -43,6 +43,12 @@ sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
 [target.'cfg(not(windows))'.dependencies]
 sdl2 = "0.37"
 
+# Phase 4: GPIO + SPI for Pi 5 hardware panel. rppal >= 0.19 is required for Pi 5's RP1
+# I/O controller (character-device GPIO API). This dep is Linux-target-gated so the
+# Windows dev-machine build pulls in zero new transitive deps.
+[target.'cfg(target_os = "linux")'.dependencies]
+rppal = "0.19"
+
 [profile.dev]
 # A fully-unoptimized core runs unbearably slowly; opt-level 1 keeps emulation usable
 # while preserving fast incremental builds for the frontend code.
