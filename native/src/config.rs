@@ -156,6 +156,22 @@ pub const CGA_COLORS: [[f32; 3]; 16] = [
     [1.000, 1.000, 1.000],
 ];
 
+// ── Audio analysis constants (V2_CONFIG audio params) ───────────────────────
+
+/// FFT frame size. Matches AnalyserNode fftSize = 1024 in v2/audio.js.
+pub const FFT_SIZE: usize = 1024;
+/// Output spectrum bin count = FFT_SIZE / 2.
+pub const FFT_BINS: usize = FFT_SIZE / 2;
+/// Smoothing coefficient applied to magnitudes before dB conversion.
+/// Matches AnalyserNode.smoothingTimeConstant = 0.65.
+pub const FFT_SMOOTHING: f32 = 0.65;
+/// Beat threshold multiplier: beat fires when bass > avg * BEAT_THRESHOLD.
+pub const BEAT_THRESHOLD: f32 = 1.25;
+/// Rolling history window for beat detection (frames). Matches V2_CONFIG.BEAT_HISTORY.
+pub const BEAT_HISTORY: usize = 43;
+/// Minimum gap between beats in milliseconds. Matches V2_CONFIG.BEAT_COOLDOWN.
+pub const BEAT_COOLDOWN_MS: f32 = 300.0;
+
 // ── Fusion constants (verbatim from V2_CONFIG) ───────────────────────────────
 
 /// ASCII art stamp dimensions — must match AsciiArtLibrary frame dimensions.

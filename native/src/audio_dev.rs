@@ -1,3 +1,4 @@
+use crate::audio::AudioSource;
 use crate::rng::Xorshift32;
 
 /// Six log-spaced energy bands — the exact set `fusion` consumes.
@@ -59,6 +60,9 @@ impl DevAudioSource {
     pub fn beat_intensity(&self) -> f32 {
         self.beat_intensity
     }
+
+    /// Alias used by the `AudioSource` trait so callers can use `update()` uniformly.
+    pub fn update(&mut self) { self.tick() }
 
     /// Advance one 30 Hz logic frame. Call from the same fixed tick as `fusion.update`.
     pub fn tick(&mut self) {
@@ -127,6 +131,14 @@ impl DevAudioSource {
             self.beat_intensity *= 0.9;
         }
     }
+}
+
+impl AudioSource for DevAudioSource {
+    fn update(&mut self)                      { self.tick() }
+    fn spectrum(&self) -> &[f32]              { &self.spectrum }
+    fn bands(&self) -> Bands                  { self.bands }
+    fn beat_active(&self) -> bool             { self.beat_active }
+    fn beat_intensity(&self) -> f32           { self.beat_intensity }
 }
 
 #[cfg(test)]

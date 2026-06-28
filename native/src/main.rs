@@ -1,6 +1,7 @@
 #![allow(dead_code, non_camel_case_types)]
 
 mod ascii_art;
+mod audio;
 mod audio_dev;
 mod config;
 mod frontend;
@@ -243,9 +244,8 @@ fn run_window(
         t
     };
 
-    // Phase 2: Fusion replaces the Phase 1 static test pattern.
-    // DevAudioSource provides synthetic 120-BPM audio until cpal arrives in Phase 3.
-    let mut audio = audio_dev::DevAudioSource::new(512);
+    // Phase 3: try to open the default cpal input; falls back to synthetic DevAudioSource.
+    let mut audio = audio::new_source();
     let charset: Vec<String> = ascii.charset().to_vec();  // clone once at startup
     let mut fusion = fusion::Fusion::new(ascii.cols(), ascii.rows(), &charset);
 
@@ -298,8 +298,8 @@ fn run_window(
             logic_accum = logic_accum.min(4.0 * LOGIC_DT);
 
             while logic_accum >= LOGIC_DT {
-                // 1. Advance synthetic audio.
-                audio.tick();
+                // 1. Advance audio (cpal capture or synthetic fallback).
+                audio.update();
 
                 // 2. Chroma beat envelope (mirrors sketch.js _chromaBeatCurrent update).
                 params.chroma_beat_current = params.chroma_beat_current * 0.85

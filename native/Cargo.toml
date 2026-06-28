@@ -13,6 +13,12 @@ path = "src/main.rs"
 # Thin GL/GLES bindings; entry points are loaded at runtime via SDL's proc-address loader.
 glow = "0.13"
 
+# Phase 3: USB audio capture (WASAPI on Windows; ALSA on Pi — requires libasound2-dev at build time).
+cpal = "0.15"
+
+# Phase 3: FFT for the analysis pipeline (plan_fft_forward, process_with_scratch).
+rustfft = "6"
+
 # dlopen the libretro core (.so / .dll / .dylib) and resolve its symbols.
 libloading = "0.8"
 
