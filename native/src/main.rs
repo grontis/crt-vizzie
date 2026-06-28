@@ -285,6 +285,21 @@ fn run_window(
                     params.bg_enabled = !params.bg_enabled;
                     eprintln!("[renderer] bg_enabled: {}", params.bg_enabled);
                 }
+                Event::KeyDown { keycode: Some(Keycode::F), .. } => {
+                    use sdl2::video::FullscreenType;
+                    // Borderless desktop fullscreen (no video-mode change) — the kiosk-friendly
+                    // choice on both Windows and the Pi. The subsequent WindowEvent::Resized
+                    // rebuilds the ASCII grid for the new dimensions automatically.
+                    let next = match gfx.window.fullscreen_state() {
+                        FullscreenType::Off => FullscreenType::Desktop,
+                        _ => FullscreenType::Off,
+                    };
+                    if let Err(e) = gfx.window.set_fullscreen(next) {
+                        eprintln!("[renderer] fullscreen toggle failed: {}", e);
+                    } else {
+                        eprintln!("[renderer] fullscreen: {:?}", next);
+                    }
+                }
                 Event::Window { win_event: sdl2::event::WindowEvent::Resized(w, h), .. } => {
                     unsafe { ascii.resize(&gfx.gl, w as u32, h as u32) };
                     fusion.reset(ascii.cols(), ascii.rows());
