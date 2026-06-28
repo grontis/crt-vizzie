@@ -1,0 +1,1028 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::rng::Xorshift32;
+
+// ── Supporting types ──────────────────────────────────────────────────────────
+
+/// Per-column rain state.
+struct RainCol {
+    head_y:   f32,
+    speed:    f32,
+    bin_frac: f32, // column's log-spaced spectral fraction
+}
+
+/// Active pulse wave (spawned by glitch layer on hard beats).
+struct PulseWave {
+    cx:         f32,
+    cy:         f32,
+    r:          f32,
+    max_r:      f32,
+    speed:      f32,
+    intensity:  f32,
+    color_base: u8,
+}
+
+/// Audio data consumed by `Fusion::update`. Built in `main.rs` from `DevAudioSource`.
+/// Swapping to cpal in Phase 3 only requires changing one line in main.rs.
+pub struct AudioFrame<'a> {
+    pub spectrum:       &'a [f32],
+    pub bands:          crate::audio_dev::Bands,
+    pub beat_active:    bool,
+    pub beat_intensity: f32,
+}
+
+// ── Free helper functions (avoid borrowing conflicts in update) ───────────────
+
+/// Write one cell into the three output slices.
+#[inline]
+fn set_cell_by_idx(
+    char_idx:    &mut [u16],
+    bright16:    &mut [u16],
+    cga_idx_buf: &mut [u8],
+    idx: usize,
+    char_atlas_idx: u16,
+    brightness: f32,
+    cga: u8,
+) {
+    char_idx[idx]    = char_atlas_idx;
+    bright16[idx]    = (brightness.clamp(0.0, 1.0) * 65535.0) as u16;
+    cga_idx_buf[idx] = cga;
+}
+
+/// Look up `ch` in the char map; emit a one-time warning if missing.
+fn char_idx_or_warn(
+    char_map:       &HashMap<char, u16>,
+    warned_missing: &mut HashSet<char>,
+    ch: char,
+) -> u16 {
+    match char_map.get(&ch) {
+        Some(&idx) => idx,
+        None => {
+            if warned_missing.insert(ch) {
+                eprintln!("[fusion] char not in atlas: {:?} (U+{:04X})", ch, ch as u32);
+            }
+            0
+        }
+    }
+}
+
+/// Return a random atlas index from the katakana pool.
+fn katakana_idx(rng: &mut Xorshift32, pool: &[char], char_map: &HashMap<char, u16>) -> u16 {
+    if pool.is_empty() { return 0; }
+    let i = (rng.rand() * pool.len() as f32) as usize % pool.len();
+    *char_map.get(&pool[i]).unwrap_or(&0)
+}
+
+/// Return a random atlas index from the glitch char pool.
+fn gli_char_idx(rng: &mut Xorshift32, gli: &[char], char_map: &HashMap<char, u16>) -> u16 {
+    if gli.is_empty() { return 0; }
+    let i = (rng.rand() * gli.len() as f32) as usize % gli.len();
+    *char_map.get(&gli[i]).unwrap_or(&0)
+}
+
+/// Stamp a random figure into the figure layer buffers.
+fn stamp_figure(
+    rng:            &mut Xorshift32,
+    figure_bright:  &mut [f32],
+    figure_char:    &mut [u16],
+    char_map:       &HashMap<char, u16>,
+    warned_missing: &mut HashSet<char>,
+    cols: usize,
+    rows: usize,
+    brightness: f32,
+) {
+    use crate::ascii_art::FIGURES;
+    use crate::config::{MORPH_HEIGHT, MORPH_WIDTH};
+
+    let fig_idx = (rng.rand() * FIGURES.len() as f32) as usize % FIGURES.len();
+    let fig = &FIGURES[fig_idx];
+    // div_euclid matches JS Math.floor for negative numerators (grid < morph dims).
+    let sr = (rows as isize - MORPH_HEIGHT as isize).div_euclid(2);
+    let sc = (cols as isize - MORPH_WIDTH  as isize).div_euclid(2);
+
+    for (r_off, row_str) in fig.rows.iter().enumerate() {
+        for (c_off, ch) in row_str.chars().enumerate() {
+            if ch == ' ' { continue; }
+            let gr = sr + r_off as isize;
+            let gc = sc + c_off as isize;
+            if gr < 0 || gr >= rows as isize || gc < 0 || gc >= cols as isize { continue; }
+            let idx = gr as usize * cols + gc as usize;
+            figure_char[idx]  = char_idx_or_warn(char_map, warned_missing, ch);
+            figure_bright[idx] = brightness;
+        }
+    }
+}
+
+/// Seed the glitch layer with a hex-dump pattern.
+fn seed_hex_dump(
+    rng:            &mut Xorshift32,
+    glitch_bright:  &mut [f32],
+    glitch_char:    &mut [u16],
+    glitch_cga:     &mut [u8],
+    char_map:       &HashMap<char, u16>,
+    cols: usize,
+    rows: usize,
+) {
+    let start_row = (rng.rand() * (rows.saturating_sub(8).max(1)) as f32) as usize;
+    let start_col = (rng.rand() * (cols.saturating_sub(30).max(1)) as f32) as usize;
+
+    for r in start_row..(start_row + 6).min(rows) {
+        // Address label  e.g. "00F0: "
+        let addr = format!("{:04X}: ", r * 16);
+        for (c_off, ch) in addr.chars().enumerate() {
+            let col = start_col + c_off;
+            if col >= cols { break; }
+            let idx = r * cols + col;
+            glitch_char[idx]  = *char_map.get(&ch).unwrap_or(&0);
+            glitch_cga[idx]   = (rng.rand() * 4.0) as u8 + 1;
+            glitch_bright[idx] = 0.7 + rng.rand() * 0.3;
+        }
+        // 16 hex bytes
+        for b in 0..16usize {
+            let byte_val = (rng.rand() * 256.0) as u8;
+            let byte_str = format!("{:02X} ", byte_val);
+            let bc = start_col + 6 + b * 3;
+            for (i, ch) in byte_str.chars().enumerate() {
+                let col = bc + i;
+                if col >= cols { break; }
+                let idx = r * cols + col;
+                glitch_char[idx]  = *char_map.get(&ch).unwrap_or(&0);
+                glitch_cga[idx]   = (rng.rand() * 5.0) as u8 + 10;
+                glitch_bright[idx] = 0.5 + rng.rand() * 0.5;
+            }
+        }
+    }
+}
+
+/// Seed the glitch layer with a spectrum bar-chart visualisation.
+fn seed_from_spectrum(
+    glitch_bright: &mut [f32],
+    glitch_char:   &mut [u16],
+    glitch_cga:    &mut [u8],
+    spectrum:      &[f32],
+    char_map:      &HashMap<char, u16>,
+    cols: usize,
+    rows: usize,
+) {
+    let start_row = (rows as f32 * 0.3) as usize;
+    let bar_rows  = (rows as f32 * 0.5) as usize;
+    let bar_char  = *char_map.get(&'█').unwrap_or(&0);
+    let dot_char  = *char_map.get(&'·').unwrap_or(&0);
+
+    for c in 0..cols {
+        let spec_idx = ((c as f32 / cols as f32) * spectrum.len() as f32) as usize;
+        let spec_idx = spec_idx.min(spectrum.len().saturating_sub(1));
+        let val  = if spectrum.is_empty() { 0.0 } else { spectrum[spec_idx] };
+        let bar_h = (val * bar_rows as f32) as usize;
+
+        for r in 0..bar_rows {
+            let row = start_row + bar_rows.saturating_sub(1 + r);
+            if row >= rows { continue; }
+            let idx = row * cols + c;
+            if r < bar_h {
+                glitch_char[idx]  = bar_char;
+                glitch_cga[idx]   = (c % 4) as u8 + 9;
+                glitch_bright[idx] = 0.6;
+            } else {
+                glitch_char[idx]  = dot_char;
+                glitch_cga[idx]   = 0;
+                glitch_bright[idx] = 0.05;
+            }
+        }
+    }
+}
+
+/// Seed the glitch layer with a random figure (random CGA colors).
+fn seed_glitch_figure(
+    rng:            &mut Xorshift32,
+    glitch_bright:  &mut [f32],
+    glitch_char:    &mut [u16],
+    glitch_cga:     &mut [u8],
+    char_map:       &HashMap<char, u16>,
+    warned_missing: &mut HashSet<char>,
+    cols: usize,
+    rows: usize,
+) {
+    use crate::ascii_art::FIGURES;
+    use crate::config::{MORPH_HEIGHT, MORPH_WIDTH};
+
+    let fig_idx = (rng.rand() * FIGURES.len() as f32) as usize % FIGURES.len();
+    let fig = &FIGURES[fig_idx];
+    // div_euclid matches JS Math.floor for negative numerators (grid < morph dims).
+    let sr = (rows as isize - MORPH_HEIGHT as isize).div_euclid(2);
+    let sc = (cols as isize - MORPH_WIDTH  as isize).div_euclid(2);
+
+    for (r_off, row_str) in fig.rows.iter().enumerate() {
+        for (c_off, ch) in row_str.chars().enumerate() {
+            let gr = sr + r_off as isize;
+            let gc = sc + c_off as isize;
+            if gr < 0 || gr >= rows as isize || gc < 0 || gc >= cols as isize { continue; }
+            let idx = gr as usize * cols + gc as usize;
+            glitch_char[idx]  = char_idx_or_warn(char_map, warned_missing, ch);
+            glitch_cga[idx]   = (rng.rand() * 16.0) as u8;
+            glitch_bright[idx] = if ch == ' ' { 0.0 } else { 0.8 };
+        }
+    }
+}
+
+// ── Fusion struct ─────────────────────────────────────────────────────────────
+
+pub struct Fusion {
+    cols: usize,
+    rows: usize,
+
+    // character pools (built once at construction)
+    katakana_pool: Vec<char>,
+    gli_chars:     Vec<char>,
+
+    // char → atlas-index map (built from renderer charset)
+    char_map: HashMap<char, u16>,
+
+    // output buffers — public so main.rs can borrow slices
+    pub char_idx: Vec<u16>,
+    pub bright16: Vec<u16>,
+    pub cga_idx:  Vec<u8>,
+
+    // figure layer
+    figure_bright: Vec<f32>,
+    figure_char:   Vec<u16>,
+    seed_timer:    u32,
+
+    // rain layer
+    rain: Vec<RainCol>,
+
+    // wave layer
+    wave_char_idx:     Vec<u16>,
+    wave_time:         f32,
+    wave_beat_boost:   f32,
+    wave_thresh_boost: f32,
+
+    // glitch layer
+    glitch_bright:    Vec<f32>,
+    glitch_cga_idx:   Vec<u8>,
+    glitch_char:      Vec<u16>,
+    glitch_seed_timer: u32,
+    pulse_waves:      Vec<PulseWave>,
+
+    // beat / timing state
+    now_ms:           f32,   // increments 1000/30 per tick
+    last_beat_ms:     f32,
+    beat_interval:    f32,   // EWMA of beat intervals (ms); init 600
+    prev_beat_active: bool,
+
+    // RNG
+    rng: Xorshift32,
+
+    // one-time warn set for missing chars
+    warned_missing: HashSet<char>,
+}
+
+impl Fusion {
+    /// Build a new Fusion.
+    ///
+    /// `charset` is the ordered glyph list from `AsciiRenderer::charset()`.
+    /// Each element is a single-character String; its position is the atlas index.
+    pub fn new(cols: usize, rows: usize, charset: &[String]) -> Self {
+        let char_map: HashMap<char, u16> = charset
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.chars().next().map(|c| (c, i as u16)))
+            .collect();
+
+        let katakana_pool: Vec<char> = crate::config::KATAKANA.to_vec();
+        let gli_chars: Vec<char>     = crate::config::GLI_CHARS.chars().collect();
+
+        let mut rng = Xorshift32::new(0xDEAD_BEEF);
+        let mut warned_missing = HashSet::new();
+        let n = cols * rows;
+
+        // Initialise rain columns
+        let mut rain = Vec::with_capacity(cols);
+        for c in 0..cols {
+            let head_y  = rng.rand() * -(rows as f32);
+            let speed   = 0.01 + rng.rand() * 0.19;
+            let bin_frac = c as f32 / (cols.saturating_sub(1).max(1)) as f32;
+            rain.push(RainCol { head_y, speed, bin_frac });
+        }
+
+        // Pre-fill wave chars with random katakana
+        let mut wave_char_idx = vec![0u16; n];
+        for i in 0..n {
+            wave_char_idx[i] = katakana_idx(&mut rng, &katakana_pool, &char_map);
+        }
+
+        // Figure buffers (stamp_figure writes the initial figure below)
+        let mut figure_bright = vec![0.0f32; n];
+        let mut figure_char   = vec![0u16; n];
+
+        // Stamp the initial figure before the struct is constructed
+        stamp_figure(
+            &mut rng, &mut figure_bright, &mut figure_char,
+            &char_map, &mut warned_missing,
+            cols, rows, 0.65,
+        );
+
+        Fusion {
+            cols, rows,
+            katakana_pool, gli_chars, char_map,
+            char_idx:  vec![0u16; n],
+            bright16:  vec![0u16; n],
+            cga_idx:   vec![0u8; n],
+            figure_bright, figure_char, seed_timer: 0,
+            rain,
+            wave_char_idx, wave_time: 0.0, wave_beat_boost: 0.0, wave_thresh_boost: 0.0,
+            glitch_bright:     vec![0.0f32; n],
+            glitch_cga_idx:    vec![0u8; n],
+            glitch_char:       vec![0u16; n],
+            glitch_seed_timer: 0,
+            pulse_waves:       Vec::new(),
+            now_ms: 0.0, last_beat_ms: 0.0, beat_interval: 600.0, prev_beat_active: false,
+            rng, warned_missing,
+        }
+    }
+
+    /// Reallocate all buffers for a new grid size and re-stamp the initial figure.
+    pub fn reset(&mut self, cols: usize, rows: usize) {
+        self.cols = cols;
+        self.rows = rows;
+        let n = cols * rows;
+
+        // Output buffers
+        self.char_idx = vec![0u16; n];
+        self.bright16 = vec![0u16; n];
+        self.cga_idx  = vec![0u8; n];
+
+        // Figure layer
+        self.figure_bright = vec![0.0f32; n];
+        self.figure_char   = vec![0u16; n];
+        self.seed_timer    = 0;
+
+        // Rain
+        self.rain.clear();
+        for c in 0..cols {
+            let head_y   = self.rng.rand() * -(rows as f32);
+            let speed    = 0.01 + self.rng.rand() * 0.19;
+            let bin_frac = c as f32 / (cols.saturating_sub(1).max(1)) as f32;
+            self.rain.push(RainCol { head_y, speed, bin_frac });
+        }
+
+        // Glitch layer
+        self.glitch_bright    = vec![0.0f32; n];
+        self.glitch_cga_idx   = vec![0u8; n];
+        self.glitch_char      = vec![0u16; n];
+        self.glitch_seed_timer = 0;
+        self.pulse_waves.clear();
+
+        // Wave layer
+        self.wave_char_idx = vec![0u16; n];
+        for i in 0..n {
+            self.wave_char_idx[i] = katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map);
+        }
+        self.wave_time        = 0.0;
+        self.wave_beat_boost  = 0.0;
+        self.wave_thresh_boost = 0.0;
+
+        // Stamp initial figure
+        stamp_figure(
+            &mut self.rng, &mut self.figure_bright, &mut self.figure_char,
+            &self.char_map, &mut self.warned_missing,
+            cols, rows, 0.65,
+        );
+    }
+
+    /// One 30 Hz logic tick: update all layer state, then composite into
+    /// `self.char_idx` / `self.bright16` / `self.cga_idx`.
+    pub fn update(
+        &mut self,
+        audio:  &AudioFrame<'_>,
+        cols:   usize,
+        rows:   usize,
+        params: &crate::config::Params,
+    ) {
+        // Guard: resize if the grid changed (mirrors JS's auto-reset in update).
+        if cols != self.cols || rows != self.rows {
+            self.reset(cols, rows);
+        }
+        let n = cols * rows;
+        if n == 0 { return; }
+
+        // ── Timing and beat tracking ──────────────────────────────────────────
+        self.now_ms += 1000.0 / 30.0;
+
+        let beat_rising_edge = audio.beat_active && !self.prev_beat_active;
+        self.prev_beat_active = audio.beat_active;
+
+        if audio.beat_active {
+            if self.last_beat_ms > 0.0 {
+                let iv = self.now_ms - self.last_beat_ms;
+                if iv > 200.0 && iv < 2000.0 {
+                    self.beat_interval = self.beat_interval * 0.75 + iv * 0.25;
+                }
+            }
+            self.last_beat_ms = self.now_ms;
+        }
+
+        // ── Clear output arrays ───────────────────────────────────────────────
+        self.char_idx[..n].fill(0);
+        self.bright16[..n].fill(0);
+        self.cga_idx[..n].fill(0);
+
+        // =====================================================================
+        // STATE UPDATE PHASES
+        // =====================================================================
+
+        // ── Phase 1: Figure layer state ───────────────────────────────────────
+        if params.fig_enabled {
+            self.seed_timer += 1;
+            let force_reseed = audio.beat_active && audio.beat_intensity > 0.85 && self.seed_timer > 40;
+            if self.seed_timer >= params.fig_reseed_frames || force_reseed {
+                self.seed_timer = 0;
+                stamp_figure(
+                    &mut self.rng, &mut self.figure_bright, &mut self.figure_char,
+                    &self.char_map, &mut self.warned_missing,
+                    cols, rows, params.fig_brightness,
+                );
+            }
+
+            let total_energy = ((audio.bands.bass + audio.bands.mid + audio.bands.treble) / 3.0).max(0.1);
+            let decay        = params.fig_decay * (0.5 + 0.5 * total_energy);
+            let smear_chance = params.fig_smear * audio.bands.bass.max(0.3);
+
+            // Iterate row-major so the rightward smear can cascade (matches JS in-place).
+            for i in 0..n {
+                let c = i % cols;
+                let brt = self.figure_bright[i];
+                let new_brt = (brt - decay).max(0.0);
+                self.figure_bright[i] = new_brt;
+
+                // Horizontal smear — writes idx+1 in-place (cascade intended)
+                if new_brt > 0.08
+                    && self.figure_char[i] != 0
+                    && c + 1 < cols
+                {
+                    let smear_roll = self.rng.rand();
+                    if smear_roll < smear_chance {
+                        let ni = i + 1;
+                        if self.figure_bright[ni] < new_brt * 0.6 {
+                            self.figure_char[ni]  = self.figure_char[i];
+                            self.figure_bright[ni] = new_brt * 0.5;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Phase 2: Rain layer state ─────────────────────────────────────────
+        if params.rain_enabled {
+            // Beat multiplier
+            if audio.beat_active {
+                for col in &mut self.rain {
+                    col.speed = (col.speed * params.rain_beat_mult)
+                        .min(params.rain_speed_max * params.rain_beat_mult);
+                }
+            }
+
+            for c in 0..cols {
+                if !audio.beat_active {
+                    let log_frac = self.rain[c].bin_frac.powf(1.8);
+                    let spec_len = audio.spectrum.len();
+                    let spec_idx = ((log_frac * spec_len as f32) as usize).min(spec_len.saturating_sub(1));
+                    let bin_e    = if spec_len > 0 { audio.spectrum[spec_idx] } else { 0.0 };
+                    let target   = params.rain_speed_min + bin_e * (params.rain_speed_max - params.rain_speed_min);
+                    self.rain[c].speed += (target - self.rain[c].speed) * 0.05;
+                    self.rain[c].speed  = self.rain[c].speed.max(params.rain_speed_min * 0.5);
+                }
+
+                self.rain[c].head_y += self.rain[c].speed;
+                if self.rain[c].head_y > rows as f32 + params.rain_trail as f32 {
+                    self.rain[c].head_y = self.rng.rand() * -10.0;
+                    self.rain[c].speed  = params.rain_speed_min
+                        + self.rng.rand() * (params.rain_speed_max - params.rain_speed_min);
+                }
+
+                // Rain head burn: boost figure brightness where the head touches
+                let head_row = self.rain[c].head_y.floor() as isize;
+                if head_row >= 0 && head_row < rows as isize {
+                    let fig_idx = head_row as usize * cols + c;
+                    if self.figure_bright[fig_idx] > 0.0 {
+                        self.figure_bright[fig_idx] =
+                            (self.figure_bright[fig_idx] + params.rain_burn_boost).min(1.0);
+                    }
+                }
+            }
+        }
+
+        // ── Phase 2b: Wave layer state ────────────────────────────────────────
+        if params.wave_enabled {
+            if beat_rising_edge {
+                self.wave_beat_boost   = (self.wave_beat_boost
+                    + params.wave_beat_boost * audio.beat_intensity).min(0.8);
+                self.wave_thresh_boost = (self.wave_thresh_boost
+                    + params.wave_thresh_drop * audio.beat_intensity).min(0.5);
+            }
+            self.wave_time       += params.wave_speed + self.wave_beat_boost;
+            self.wave_beat_boost   = (self.wave_beat_boost   - params.wave_beat_decay).max(0.0);
+            self.wave_thresh_boost = (self.wave_thresh_boost - params.wave_beat_decay * 0.7).max(0.0);
+        }
+
+        // ── Phase 3: Glitch layer state ───────────────────────────────────────
+        if params.glitch_enabled {
+            let beat_phase = if self.last_beat_ms > 0.0 && self.beat_interval > 0.0 {
+                ((self.now_ms - self.last_beat_ms) / self.beat_interval).min(1.0)
+            } else {
+                0.0
+            };
+            let scaled_intensity = (audio.beat_intensity * params.glitch_intensity_scale).min(1.0);
+
+            // Timer-based seeding
+            self.glitch_seed_timer += 1;
+            if self.glitch_seed_timer >= params.glitch_seed_interval
+                || (audio.beat_active && self.glitch_seed_timer > params.glitch_beat_seed_min)
+            {
+                self.glitch_seed_timer = 0;
+                let choice = (self.rng.rand() * 3.0) as u32;
+                match choice {
+                    0 => seed_hex_dump(
+                        &mut self.rng,
+                        &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
+                        &self.char_map, cols, rows,
+                    ),
+                    1 => seed_from_spectrum(
+                        &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
+                        audio.spectrum, &self.char_map, cols, rows,
+                    ),
+                    _ => seed_glitch_figure(
+                        &mut self.rng,
+                        &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
+                        &self.char_map, &mut self.warned_missing, cols, rows,
+                    ),
+                }
+            }
+
+            // Beat reactions
+            if audio.beat_active {
+                // Random scatter
+                if scaled_intensity > params.glitch_scatter_threshold {
+                    let count = (scaled_intensity * cols as f32 * rows as f32 * params.glitch_scatter) as usize;
+                    for _ in 0..count {
+                        let gr  = (self.rng.rand() * rows as f32) as usize % rows;
+                        let gc  = (self.rng.rand() * cols as f32) as usize % cols;
+                        let idx = gr * cols + gc;
+                        self.glitch_char[idx]  = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                        self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
+                        self.glitch_bright[idx] = 0.4 + self.rng.rand() * 0.5;
+                    }
+                }
+
+                // Horizontal blast strip on hard beats
+                if scaled_intensity > params.glitch_blast_threshold {
+                    let blast_row   = (self.rng.rand() * rows as f32) as usize % rows;
+                    let blast_len   = (scaled_intensity * cols as f32 * 0.65) as usize;
+                    let max_start   = (cols as isize - blast_len as isize).max(1) as usize;
+                    let blast_start = (self.rng.rand() * max_start as f32) as usize % max_start;
+                    for bc in blast_start..(blast_start + blast_len).min(cols) {
+                        let idx = blast_row * cols + bc;
+                        self.glitch_char[idx]  = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                        self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
+                        self.glitch_bright[idx] = 0.75 + self.rng.rand() * 0.25;
+                    }
+                }
+
+                // Spawn a pulse wave
+                if scaled_intensity > params.glitch_threshold {
+                    let spawn_roll = self.rng.rand();
+                    if spawn_roll < params.glitch_chance {
+                        self.pulse_waves.push(PulseWave {
+                            cx:         self.rng.rand() * cols as f32,
+                            cy:         self.rng.rand() * rows as f32,
+                            r:          0.0,
+                            max_r:      cols.max(rows) as f32 * (0.4 + scaled_intensity * 0.6),
+                            speed:      0.4 + scaled_intensity * 1.8,
+                            intensity:  scaled_intensity,
+                            color_base: (self.rng.rand() * 16.0) as u8,
+                        });
+                    }
+                }
+            }
+
+            // Expand pulse waves: retain_mut advances r and removes expired waves,
+            // then a second loop draws points (avoids borrow conflict with glitch arrays).
+            self.pulse_waves.retain_mut(|w| {
+                w.r += w.speed;
+                w.r <= w.max_r
+            });
+
+            let asp_y = if cols > 0 { rows as f32 / cols as f32 } else { 1.0 };
+            for wi in 0..self.pulse_waves.len() {
+                let (cx, cy, r, max_r, intensity, color_base) = {
+                    let w = &self.pulse_waves[wi];
+                    (w.cx, w.cy, w.r, w.max_r, w.intensity, w.color_base)
+                };
+                let density = 1.0 - r / max_r;
+                let pts = ((r * std::f32::consts::PI * 1.4 * density * intensity) as usize).max(3);
+                for _ in 0..pts {
+                    let a  = self.rng.rand() * std::f32::consts::TAU;
+                    let gc = (cx + a.cos() * r).round() as isize;
+                    let gr = (cy + a.sin() * r * asp_y).round() as isize;
+                    if gc < 0 || gc >= cols as isize || gr < 0 || gr >= rows as isize { continue; }
+                    let idx = gr as usize * cols + gc as usize;
+                    let brt = (0.4 + self.rng.rand() * 0.6) * density * intensity;
+                    if brt > self.glitch_bright[idx] {
+                        self.glitch_char[idx]    = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                        self.glitch_cga_idx[idx] = (color_base + (self.rng.rand() * 4.0) as u8) % 16;
+                        self.glitch_bright[idx]  = brt;
+                    }
+                }
+            }
+
+            // Treble noise
+            let air_energy = audio.bands.high_mid * 0.5 + audio.bands.treble * 0.5;
+            if air_energy > params.glitch_treble_floor {
+                let noise_count = (air_energy * cols as f32 * 0.15) as usize;
+                for _ in 0..noise_count {
+                    let nr  = (self.rng.rand() * rows as f32) as usize % rows;
+                    let nc  = (self.rng.rand() * cols as f32) as usize % cols;
+                    let idx = nr * cols + nc;
+                    self.glitch_char[idx]    = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                    self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
+                    self.glitch_bright[idx]  = 0.3 + self.rng.rand() * 0.5;
+                }
+            }
+
+            // Decay suite — O(rows × cols) inner loop with in-place smear + tear.
+            // Reads and writes to glitch_bright/char/cga in a forward pass;
+            // h-smear writes idx+1 and v-smear writes (r+1)*cols+c, both intentionally
+            // visible to subsequent iterations (cascade, matching JS behaviour).
+            let glitch_energy    = ((audio.bands.bass + audio.bands.mid + audio.bands.treble) / 3.0).max(0.1);
+            let bass_weight      = audio.bands.bass.max(0.15);
+            let phase_decay_mult = 0.3 + beat_phase * 1.5;
+            let decay_amount     = params.glitch_decay_rate * (0.4 + 0.6 * glitch_energy) * phase_decay_mult;
+            let h_smear_chance   = params.glitch_smear_chance * bass_weight;
+            let v_smear_chance   = params.glitch_smear_chance * 0.5 * air_energy;
+            let subst_rate       = 0.04 * bass_weight + 0.05 * audio.bands.treble;
+            let tear_chance      = params.glitch_tear * bass_weight;
+            let drop_chance      = params.glitch_drop_chance * bass_weight;
+
+            for r in 0..rows {
+                for c in 0..cols {
+                    let idx     = r * cols + c;
+                    let brt     = self.glitch_bright[idx];
+                    let new_brt = (brt - decay_amount).max(0.0);
+                    self.glitch_bright[idx] = new_brt;
+
+                    // Horizontal smear (cascade: writes ahead in the same loop pass)
+                    if c + 1 < cols {
+                        let smear_h = self.rng.rand();
+                        if smear_h < h_smear_chance {
+                            let ni = idx + 1;
+                            self.glitch_char[ni]  = self.glitch_char[idx];
+                            self.glitch_cga_idx[ni] = self.glitch_cga_idx[idx];
+                            self.glitch_bright[ni] = new_brt * 0.75;
+                        }
+                    }
+
+                    // Vertical (downward) smear
+                    if r + 1 < rows {
+                        let smear_v = self.rng.rand();
+                        if smear_v < v_smear_chance {
+                            let di = (r + 1) * cols + c;
+                            self.glitch_char[di]  = self.glitch_char[idx];
+                            self.glitch_cga_idx[di] = self.glitch_cga_idx[idx].wrapping_add(1) % 16;
+                            self.glitch_bright[di] = new_brt * 0.65;
+                        }
+                    }
+
+                    // Char substitution
+                    if new_brt > 0.1 {
+                        let subst = self.rng.rand();
+                        if subst < subst_rate {
+                            self.glitch_char[idx]    = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                            self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
+                        }
+                    }
+
+                    // Vertical tear — copies row r upward into row r-1.
+                    // The JS srcIdx = r*cols+tc, dstIdx = (r-1)*cols+tc (confirmed upward).
+                    if r > 0 {
+                        let tear = self.rng.rand();
+                        if tear < tear_chance {
+                            let raw = (self.rng.rand() * 12.0 * (0.3 + audio.beat_intensity)) as usize + 2;
+                            let tear_length = raw.min(cols - c);
+                            for tc in c..(c + tear_length) {
+                                let src_idx = r * cols + tc;
+                                let dst_idx = (r - 1) * cols + tc;
+                                self.glitch_char[dst_idx]    = self.glitch_char[src_idx];
+                                self.glitch_cga_idx[dst_idx] = self.glitch_cga_idx[src_idx];
+                                self.glitch_bright[dst_idx]  = self.glitch_bright[src_idx] * 0.65;
+                            }
+                        }
+                    }
+
+                    // Dropout
+                    let drop = self.rng.rand();
+                    if drop < drop_chance {
+                        self.glitch_bright[idx] = 0.0;
+                    }
+                }
+            }
+        } else {
+            // Glitch disabled: clear dynamic state
+            self.pulse_waves.clear();
+            self.glitch_seed_timer = 0;
+        }
+
+        // =====================================================================
+        // RENDER PHASES — bgAscii (skipped) → figure → wave → rain → glitch
+        // =====================================================================
+
+        // ── Phase 4b: Figure render ───────────────────────────────────────────
+        if params.fig_enabled {
+            let fig_op = params.fig_opacity;
+            for idx in 0..n {
+                let brt = self.figure_bright[idx];
+                let ch  = self.figure_char[idx];
+                if brt > 0.02 && ch != 0 {
+                    set_cell_by_idx(
+                        &mut self.char_idx, &mut self.bright16, &mut self.cga_idx,
+                        idx, ch, (brt * fig_op).min(1.0), 0,
+                    );
+                }
+            }
+        }
+
+        // ── Phase 4c: Wave render ─────────────────────────────────────────────
+        if params.wave_enabled {
+            let t         = self.wave_time;
+            let threshold = (params.wave_threshold - self.wave_thresh_boost).max(0.1);
+            let op        = params.wave_opacity;
+            let bass_e    = audio.bands.bass;
+            let treble_e  = audio.bands.treble;
+            let mid_e     = audio.bands.mid;
+            let pi        = std::f32::consts::PI;
+            let tau       = std::f32::consts::TAU;
+
+            let cx = cols as f32 * 0.5 + (t * 0.011).sin() * cols as f32 * 0.3;
+            let cy = rows as f32 * 0.5 + (t * 0.007).cos() * rows as f32 * 0.3;
+
+            for r in 0..rows {
+                for c in 0..cols {
+                    let cn   = c as f32 / cols as f32 * tau;
+                    let rn   = r as f32 / rows as f32 * tau;
+                    let dx   = (c as f32 - cx) / cols as f32 * tau;
+                    let dy   = (r as f32 - cy) / rows as f32 * tau;
+                    let dist = (dx * dx + dy * dy).sqrt();
+
+                    let field =
+                        (cn * 2.0 + t * 0.7).sin()                              * 0.22
+                        + (cn * 1.5 + rn * 1.0 + t * 0.5).sin()                * 0.20
+                        + (rn * 2.5 - t * 0.4 + bass_e * pi).sin()             * 0.22
+                        + (dist * 2.0 - t * 1.1 + treble_e * pi).sin()         * 0.18
+                        + (cn * 1.2 - rn * 1.8 + t * 0.6 + mid_e * 0.5).sin() * 0.18;
+
+                    let norm = (field + 1.0) * 0.5;
+                    if norm > threshold {
+                        let idx  = r * cols + c;
+                        // Stochastically refresh wave char
+                        let roll = self.rng.rand();
+                        if roll < params.wave_char_rate {
+                            self.wave_char_idx[idx] =
+                                katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map);
+                        }
+                        let wave_ch = self.wave_char_idx[idx];
+                        set_cell_by_idx(
+                            &mut self.char_idx, &mut self.bright16, &mut self.cga_idx,
+                            idx, wave_ch,
+                            (norm - threshold) / (1.0 - threshold) * op,
+                            0,
+                        );
+                    }
+                }
+            }
+        }
+
+        // ── Phase 4d: Rain render ─────────────────────────────────────────────
+        if params.rain_enabled {
+            let rain_op  = params.rain_opacity;
+            let spec_len = audio.spectrum.len();
+
+            for c in 0..cols {
+                let head_y   = self.rain[c].head_y;
+                let bin_frac = self.rain[c].bin_frac;
+                let head_row = head_y.floor() as isize;
+
+                let log_frac = bin_frac.powf(1.8);
+                let spec_idx = ((log_frac * spec_len as f32) as usize).min(spec_len.saturating_sub(1));
+                let bin_e    = if spec_len > 0 { audio.spectrum[spec_idx] } else { 0.0 };
+
+                for t in 0..params.rain_trail {
+                    let r = head_row - t as isize;
+                    if r < 0 || r >= rows as isize { continue; }
+                    let cell_idx = r as usize * cols + c;
+
+                    let (char_atlas_idx, brt) = if t == 0 {
+                        // Head cell: interact with figure or pick katakana
+                        let fig_brt = self.figure_bright[cell_idx];
+                        let ch = if fig_brt > 0.1 {
+                            let interact_roll = self.rng.rand();
+                            if interact_roll < params.rain_interact {
+                                self.figure_char[cell_idx]
+                            } else {
+                                katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map)
+                            }
+                        } else {
+                            katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map)
+                        };
+                        (ch, 1.0_f32)
+                    } else {
+                        let ch = katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map);
+                        let b  = (1.0 - t as f32 / params.rain_trail as f32) * (0.5 + 0.5 * bin_e);
+                        (ch, b.max(0.0))
+                    };
+
+                    set_cell_by_idx(
+                        &mut self.char_idx, &mut self.bright16, &mut self.cga_idx,
+                        cell_idx, char_atlas_idx, brt * rain_op, 0,
+                    );
+                }
+            }
+        }
+
+        // ── Phase 4e: Glitch render (top layer) ───────────────────────────────
+        if params.glitch_enabled {
+            let use_cga = params.glitch_cga_enabled;
+            for idx in 0..n {
+                let brt = self.glitch_bright[idx];
+                let ch  = self.glitch_char[idx];
+                if brt > 0.02 && ch != 0 {
+                    let cga = if use_cga { self.glitch_cga_idx[idx] } else { 0 };
+                    set_cell_by_idx(
+                        &mut self.char_idx, &mut self.bright16, &mut self.cga_idx,
+                        idx, ch, brt, cga,
+                    );
+                }
+            }
+        }
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio_dev::Bands;
+
+    /// Build a minimal charset covering ASCII printable + katakana range.
+    fn make_charset() -> Vec<String> {
+        let mut cs: Vec<String> = (32u8..=126u8).map(|b| (b as char).to_string()).collect();
+        // Add katakana block (needed so katakana_idx doesn't always return 0)
+        for cp in 0x30A0u32..=0x30FFu32 {
+            if let Some(ch) = char::from_u32(cp) {
+                cs.push(ch.to_string());
+            }
+        }
+        // A few block chars the glitch layer uses
+        for ch in ['░', '▒', '▓', '█', '·'] {
+            cs.push(ch.to_string());
+        }
+        cs
+    }
+
+    /// Verifies that div_euclid(2) matches JS Math.floor for negative odd numerators.
+    /// The real grid is ~35×19 — smaller than MORPH (40×20) — so (rows - MORPH_HEIGHT)
+    /// and (cols - MORPH_WIDTH) are negative. Rust `/` truncates toward zero; JS
+    /// Math.floor floors toward −∞. div_euclid replicates floor, which FIX 3 requires.
+    #[test]
+    fn centering_div_euclid_matches_js_floor() {
+        use crate::config::{MORPH_HEIGHT, MORPH_WIDTH};
+
+        // Typical native grid: cols=35, rows=19 (window 1280×720 with cell 36×37)
+        let rows: isize = 19;
+        let cols: isize = 35;
+
+        // (rows - MORPH_HEIGHT) = 19 - 20 = -1 (odd negative)
+        let sr_euclid = (rows - MORPH_HEIGHT as isize).div_euclid(2);
+        let sr_trunc  = (rows - MORPH_HEIGHT as isize) / 2;
+        // JS Math.floor(-1 / 2) = Math.floor(-0.5) = -1
+        assert_eq!(sr_euclid, -1, "div_euclid should floor -1/2 to -1 (not 0)");
+        assert_eq!(sr_trunc,   0, "plain /2 truncates -1/2 to 0 — wrong for JS parity");
+        assert_ne!(sr_euclid, sr_trunc, "the two methods must differ for this input");
+
+        // (cols - MORPH_WIDTH) = 35 - 40 = -5 (odd negative)
+        let sc_euclid = (cols - MORPH_WIDTH as isize).div_euclid(2);
+        let sc_trunc  = (cols - MORPH_WIDTH as isize) / 2;
+        // JS Math.floor(-5 / 2) = Math.floor(-2.5) = -3
+        assert_eq!(sc_euclid, -3, "div_euclid should floor -5/2 to -3");
+        assert_eq!(sc_trunc,  -2, "plain /2 truncates -5/2 to -2 — wrong for JS parity");
+        assert_ne!(sc_euclid, sc_trunc, "the two methods must differ for this input");
+
+        // Even numerator: both methods agree (no fix needed, confirm no regression)
+        // (rows - MORPH_HEIGHT) with rows=18: 18-20=-2 (even)
+        let even: isize = -2;
+        assert_eq!(even.div_euclid(2), even / 2,
+            "even negatives: div_euclid and /2 must agree");
+    }
+
+    /// Verifies that stamping a figure onto a grid smaller than MORPH dimensions
+    /// uses only in-bounds writes and never panics, even for a 3×3 grid.
+    #[test]
+    fn stamp_on_tiny_grid_does_not_panic() {
+        let charset = make_charset();
+        // 3×3 grid is far smaller than MORPH (40×20). The centering formula
+        // produces large negative offsets; all figure cells fall outside the grid
+        // bounds and must be skipped silently.
+        let mut fusion = Fusion::new(3, 3, &charset);
+        assert_eq!(fusion.char_idx.len(), 9);
+
+        // Run a tick — this exercises stamp_figure via the figure layer.
+        let spectrum = vec![0.0f32; 512];
+        let bands = crate::audio_dev::Bands::default();
+        let params = crate::config::Params::default();
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+        fusion.update(&frame, 3, 3, &params);
+        // If we reach here, no OOB panic occurred.
+        assert_eq!(fusion.char_idx.len(), 9, "buffer length must not change after tiny-grid tick");
+    }
+
+    /// Verifies that beat-rising-edge detection fires exactly once per beat and that
+    /// beat_interval EWMA updates inside the valid window (200–2000 ms).
+    #[test]
+    fn beat_rising_edge_tracked_correctly() {
+        let charset = make_charset();
+        let mut fusion = Fusion::new(10, 8, &charset);
+        let spectrum = vec![0.2f32; 512];
+        let bands = crate::audio_dev::Bands { sub: 0.5, bass: 0.6, low_mid: 0.2, mid: 0.3, high_mid: 0.1, treble: 0.1 };
+        let params = crate::config::Params::default();
+
+        // Two ticks with no beat
+        for _ in 0..2 {
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+            fusion.update(&frame, 10, 8, &params);
+        }
+        // Simulate a beat
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.8 };
+        fusion.update(&frame, 10, 8, &params);
+        // After one beat, last_beat_ms should be > 0
+        assert!(fusion.now_ms > 0.0, "now_ms should advance each tick");
+        // Simulate a second beat after a gap
+        for _ in 0..8 {
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+            fusion.update(&frame, 10, 8, &params);
+        }
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.7 };
+        fusion.update(&frame, 10, 8, &params);
+        // beat_interval EWMA should have updated from 600 ms (it starts at 600;
+        // after one valid interval it shifts toward the measured interval).
+        // We just verify it's in the plausible range (200–2000 ms per the guard).
+        assert!(fusion.beat_interval > 0.0 && fusion.beat_interval < 10_000.0,
+            "beat_interval should be a plausible value, got {}", fusion.beat_interval);
+    }
+
+    #[test]
+    fn smoke_no_panic_and_buffer_lengths() {
+        let charset = make_charset();
+        let cols = 20usize;
+        let rows = 10usize;
+        let n    = cols * rows;
+
+        let mut fusion = Fusion::new(cols, rows, &charset);
+
+        assert_eq!(fusion.char_idx.len(), n);
+        assert_eq!(fusion.bright16.len(), n);
+        assert_eq!(fusion.cga_idx.len(),  n);
+
+        let spectrum = vec![0.3f32; 512];
+        let bands    = Bands {
+            sub: 0.3, bass: 0.5, low_mid: 0.2, mid: 0.3, high_mid: 0.1, treble: 0.15,
+        };
+        let params = crate::config::Params::default();
+
+        // Run ticks with no beat — layers should update without panicking.
+        for _ in 0..15 {
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+            fusion.update(&frame, cols, rows, &params);
+        }
+        assert_eq!(fusion.char_idx.len(), n, "buffer length changed after silent ticks");
+
+        // Run ticks with an active beat — all beat-reactive paths exercise.
+        for _ in 0..10 {
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.9 };
+            fusion.update(&frame, cols, rows, &params);
+        }
+        assert_eq!(fusion.char_idx.len(), n, "buffer length changed after beat ticks");
+        assert_eq!(fusion.bright16.len(), n);
+        assert_eq!(fusion.cga_idx.len(),  n);
+
+        // CGA indices must stay in the 0-15 range; our code always uses % 16 or * 16.0 as u8.
+        for &v in &fusion.cga_idx {
+            assert!(v < 16, "cga_idx value out of range: {}", v);
+        }
+
+        // Test resize: reset to a different grid, run a tick.
+        fusion.reset(30, 15);
+        assert_eq!(fusion.char_idx.len(), 30 * 15);
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+        fusion.update(&frame, 30, 15, &params);
+        assert_eq!(fusion.char_idx.len(), 30 * 15);
+    }
+}

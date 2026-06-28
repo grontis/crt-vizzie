@@ -1,13 +1,4 @@
-//! Dev-only synthetic audio source — a hardware-free fallback for developing the visualizer.
-//!
-//! NOT part of the Phase 0 spike binary (the spike has no audio). This lands when audio arrives
-//! in Phase 3, so you can develop fusion/renderer on a laptop with no USB audio interface
-//! attached. The real source remains live USB line-in via `cpal`; this only fills in when no
-//! capture device is selected.
-//!
-//! It is a faithful port of the v2 demo synth (`v2/audio.js` `_updateDemo` + `_detectBeat`):
-//! same band/spectrum math, same energy-beat detector, ticked at a fixed 30 Hz. Deterministic
-//! (seeded PRNG, fixed timestep) so it's unit-testable.
+use crate::rng::Xorshift32;
 
 /// Six log-spaced energy bands — the exact set `fusion` consumes.
 #[derive(Clone, Copy, Default)]
@@ -30,7 +21,7 @@ pub struct DevAudioSource {
     now_ms: f32,    // ms, for the beat cooldown
     beat_pulse: f32,
     bpm: f32,
-    rng: u32,
+    rng: Xorshift32,
 
     // energy-beat detector state (mirrors V2_CONFIG.BEAT_* in config.js)
     bass_history: [f32; 43],
@@ -49,7 +40,7 @@ impl DevAudioSource {
             now_ms: 0.0,
             beat_pulse: 0.0,
             bpm: 120.0,
-            rng: 0x1234_5678,
+            rng: Xorshift32::new(0x1234_5678),
             bass_history: [0.0; 43],
             hist_idx: 0,
             last_beat_ms: 0.0,
@@ -69,16 +60,6 @@ impl DevAudioSource {
         self.beat_intensity
     }
 
-    /// Deterministic xorshift32 in [0, 1).
-    fn rand(&mut self) -> f32 {
-        let mut x = self.rng;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.rng = x;
-        (x >> 8) as f32 / (1u32 << 24) as f32
-    }
-
     /// Advance one 30 Hz logic frame. Call from the same fixed tick as `fusion.update`.
     pub fn tick(&mut self) {
         self.time += 1.0 / 30.0;
@@ -95,7 +76,7 @@ impl DevAudioSource {
 
         let bass = 0.3 + 0.6 * self.beat_pulse + 0.05 * (t * 2.1).sin();
         let mid = 0.15 + 0.3 * (t * 3.7 + 0.5).sin() * (0.5 + 0.5 * (t * 0.4).sin());
-        let treble = 0.05 + 0.2 * (t * 7.3).sin().abs() * self.rand();
+        let treble = 0.05 + 0.2 * (t * 7.3).sin().abs() * self.rng.rand();
 
         let bins = self.spectrum.len();
         for i in 0..bins {
@@ -108,18 +89,20 @@ impl DevAudioSource {
             } else if norm < 0.5 {
                 mid * 0.5 * (t * 6.6 + fi * 0.7).sin().abs()
             } else {
-                treble * (0.3 + 0.7 * self.rand()) * (1.0 - norm)
+                treble * (0.3 + 0.7 * self.rng.rand()) * (1.0 - norm)
             };
             // same one-pole smoothing the v2 demo path uses
             self.spectrum[i] = self.spectrum[i] * 0.7 + val.clamp(0.0, 1.0) * 0.3;
         }
 
-        self.bands.sub = (bass * 0.9).min(1.0);
-        self.bands.bass = (bass * 0.85 + 0.05 * (t * 3.0).sin()).min(1.0);
-        self.bands.low_mid = (mid * 0.9).min(1.0);
-        self.bands.mid = (mid * 0.7 + 0.1 * (t * 5.0).sin().abs()).min(1.0);
-        self.bands.high_mid = (mid * 0.4 + treble * 0.3).min(1.0);
-        self.bands.treble = treble.min(1.0);
+        // clamp(0.0, 1.0): mid can briefly go negative when the sin term dominates,
+        // causing bands to underflow the [0, 1] contract expected by fusion and tests.
+        self.bands.sub      = (bass * 0.9).clamp(0.0, 1.0);
+        self.bands.bass     = (bass * 0.85 + 0.05 * (t * 3.0).sin()).clamp(0.0, 1.0);
+        self.bands.low_mid  = (mid * 0.9).clamp(0.0, 1.0);
+        self.bands.mid      = (mid * 0.7 + 0.1 * (t * 5.0).sin().abs()).clamp(0.0, 1.0);
+        self.bands.high_mid = (mid * 0.4 + treble * 0.3).clamp(0.0, 1.0);
+        self.bands.treble   = treble.clamp(0.0, 1.0);
 
         self.detect_beat();
     }

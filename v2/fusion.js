@@ -27,7 +27,7 @@ function _charIdxOrWarn(charMap, ch) {
 
 class V2FusionMode {
 
-  static GLI_CHARS = '!@#$%^&*[]{}|\\/<>?~`+=-_░▒▓█▄▀■□▪▫◘◙◄►▲▼◆◇○●';
+  static GLI_CHARS = '!@#$%^&*[]{}|\\/<>?~`+=-_░▒▓█▄▀■□▪▫◘◙◄►▲▼◆◇○●αβγδλπφψΩΣ∂∇∆√∞∑≈≠≤≥±∈∅←↑↓→↔⇒';
 
   /**
    * @param {number} cols

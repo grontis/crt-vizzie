@@ -1,9 +1,3 @@
-//! M0: SDL2 window + GLES3 context, with `glow` entry points loaded through SDL.
-//!
-//! The context profile/version requested here (GLES 3.0) is what the N64 core's
-//! hardware renderer (GLideN64) must share in M3 — keep this in sync with the
-//! `RETRO_HW_CONTEXT_OPENGLES3` request the env callback will make.
-
 use sdl2::video::{GLContext, GLProfile, SwapInterval, Window};
 use sdl2::{EventPump, Sdl, VideoSubsystem};
 

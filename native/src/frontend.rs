@@ -1,12 +1,3 @@
-//! M2: register the libretro callbacks and bring the core up (`retro_init`).
-//!
-//! The environment callback is the core's only channel to the platform. We answer the handful
-//! of commands the core needs to initialize and return `false` (unsupported) for the rest.
-//!
-//! Several callbacks are `extern "C"` with no user-data parameter, so the state they touch lives
-//! in module statics (atomics / OnceLock — no `static mut`). The spike is single-threaded; the
-//! atomics are for ergonomics and correctness, not contention.
-
 use std::ffi::CString;
 use std::os::raw::{c_char, c_uint, c_void};
 use std::path::Path;

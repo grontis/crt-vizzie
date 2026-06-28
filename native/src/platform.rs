@@ -1,4 +1,4 @@
-//! Small per-platform helpers so the same binary develops on Windows and deploys on the Pi.
+//! Small per-platform helpers so the same binary develops on Windows and deploys on raspberry Pi.
 //!
 //! The frontend code is platform-agnostic; only two things differ at runtime: which core
 //! binary to load (`.dll` / `.so` / `.dylib`) and — on Windows — that the GLES3 context comes

@@ -1,15 +1,3 @@
-//! Minimal libretro FFI + core loader.
-//!
-//! Scope: exactly what milestones **M0/M1** need — open the core shared library,
-//! verify the API version, and read `retro_system_info`. The FFI declared here is the
-//! stable, verified subset of `libretro.h`.
-//!
-//! For **M2+** (the environment callback and the hardware-render handshake) bring in
-//! authoritative constants/structs — either the `rust-libretro-sys` crate or `libretro.h`
-//! directly. Do NOT transcribe `RETRO_ENVIRONMENT_*` / `RETRO_HW_CONTEXT_*` values from
-//! memory: several are counterintuitive (e.g. `SET_HW_RENDER = 14`, and
-//! `RETRO_HW_CONTEXT_OPENGLES3 = 4`, not 3 or 5). Getting one wrong is a classic black screen.
-
 use std::error::Error;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_uint, c_void};

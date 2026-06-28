@@ -1,4 +1,4 @@
-//! Phase 1: AsciiRenderer — native port of `v2/renderer.js`.
+//! AsciiRenderer — native port of `v2/renderer.js`.
 //!
 //! Builds a glyph atlas (baked from the web app, loaded from `assets/`), uploads per-cell data
 //! textures (`RG16UI` charIdx+brightness, `R8` CGA index) each frame, and runs a single draw over
@@ -26,8 +26,7 @@ struct AtlasMetrics {
     atlas_rows: i32,
     atlas_tex_w: f32,
     atlas_tex_h: f32,
-    #[allow(dead_code)]
-    charset: Vec<String>, // Phase 2 (fusion char→index map); unused in Phase 1.
+    charset: Vec<String>, // Phase 2 (fusion char→index map): exposed via AsciiRenderer::charset().
 }
 
 #[cfg(windows)]
@@ -239,6 +238,12 @@ impl AsciiRenderer {
 
     pub fn cols(&self) -> usize { self.cols }
     pub fn rows(&self) -> usize { self.rows }
+
+    /// Return the ordered charset array from atlas.json.
+    /// Each element is a single-character String; index = atlas glyph index.
+    pub fn charset(&self) -> &[String] {
+        &self.m.charset
+    }
 
     /// Recompute grid from window size and (re)allocate the data textures + scratch buffer.
     /// # Safety: a current GL context must exist.

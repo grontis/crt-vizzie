@@ -1,31 +1,14 @@
 #![allow(dead_code, non_camel_case_types)]
-//! crt-vizzie — Phase 0 spike (milestone scaffold)
-//! ===============================================
-//!
-//! See `native/PHASE0_SPIKE.md` for the full plan and the go/no-go acceptance criteria.
-//!
-//! IMPLEMENTED here:
-//!   M0  SDL2 window + GLES3 context + clear loop      (run with no args)
-//!   M1  load libretro core + print system info        (run with `--core <path>`)
-//!
-//! NOT yet implemented (clearly marked TODO below, in build order):
-//!   M2  environment callback (SET_HW_RENDER, GET_LOG_INTERFACE, dirs, pixel format, ...)
-//!   M3  retro_load_game + hw-render FBO (color tex + depth RB) + context_reset
-//!   M4  one retro_run(); capture the valid w/h from the video_refresh callback
-//!   M5  textured-quad pass: sample the FBO color texture (sub-rect + v-flip) -> GAME VISIBLE
-//!   M6  core-fps pacing; run 5 min; rolling frame-time readout
-//!
-//! Usage:
-//!   crt-vizzie-spike                         # M0 only: a magenta window
-//!   crt-vizzie-spike --core <core.so>        # M0 + M1: also load the core and log its info
-//!   crt-vizzie-spike --core <core.so> --rom <game.z64>   # (--rom wired in at M3)
 
+mod ascii_art;
 mod audio_dev;
 mod config;
 mod frontend;
+mod fusion;
 mod libretro;
 mod platform;
 mod renderer;
+mod rng;
 mod sdl_gl;
 
 use std::path::PathBuf;
@@ -34,6 +17,67 @@ use std::process::ExitCode;
 struct Args {
     core: Option<PathBuf>,
     rom: Option<PathBuf>,
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    /// Simulate the 30 Hz accumulator logic from run_window:
+    ///   logic_accum = logic_accum.min(4.0 * LOGIC_DT);  // FIX 1
+    ///   while logic_accum >= LOGIC_DT { ...; logic_accum -= LOGIC_DT; }
+    /// Returns the number of ticks that would fire.
+    fn count_ticks(initial_accum: f32, logic_dt: f32) -> usize {
+        let mut accum = initial_accum.min(4.0 * logic_dt);
+        let mut count = 0;
+        while accum >= logic_dt {
+            accum -= logic_dt;
+            count += 1;
+        }
+        count
+    }
+
+    const LOGIC_DT: f32 = 1.0 / 30.0;
+
+    /// FIX 1: a large stall (shader compile can take hundreds of ms) must produce
+    /// at most 4 fusion ticks, never a burst of 30+ that would spiral the state.
+    #[test]
+    fn accumulator_cap_limits_to_four_ticks() {
+        // 1 second stall = 30 LOGIC_DTs worth of accumulation → capped to 4 ticks.
+        let stall_1s = 1.0f32;
+        assert_eq!(count_ticks(stall_1s, LOGIC_DT), 4,
+            "1-second stall should produce exactly 4 ticks (cap = 4 × LOGIC_DT)");
+
+        // Even an infinite stall is bounded.
+        let stall_inf = f32::MAX;
+        assert_eq!(count_ticks(stall_inf, LOGIC_DT), 4,
+            "infinite stall should still produce exactly 4 ticks");
+
+        // A 10× stall is also capped.
+        assert_eq!(count_ticks(10.0 * LOGIC_DT, LOGIC_DT), 4,
+            "10× LOGIC_DT stall must be capped to 4");
+    }
+
+    /// FIX 2: logic_accum initialises to LOGIC_DT (not 0) so frame 1 fires exactly
+    /// one tick, avoiding an all-black first frame.
+    #[test]
+    fn first_frame_tick_fires_with_initial_logic_dt() {
+        let initial_accum = LOGIC_DT; // matches: let mut logic_accum: f32 = LOGIC_DT;
+        assert_eq!(count_ticks(initial_accum, LOGIC_DT), 1,
+            "initial logic_accum = LOGIC_DT must fire exactly 1 tick on the first frame");
+    }
+
+    /// Normal frames: verifies 1-tick and 2-tick cases work correctly.
+    #[test]
+    fn accumulator_normal_frame_tick_counts() {
+        // Normal 33 ms frame → 1 tick.
+        assert_eq!(count_ticks(LOGIC_DT, LOGIC_DT), 1, "1× LOGIC_DT → 1 tick");
+        // Slow 66 ms frame → 2 ticks.
+        assert_eq!(count_ticks(2.0 * LOGIC_DT, LOGIC_DT), 2, "2× LOGIC_DT → 2 ticks");
+        // Just under 1 LOGIC_DT → 0 ticks (no half-tick).
+        assert_eq!(count_ticks(LOGIC_DT * 0.99, LOGIC_DT), 0, "0.99× LOGIC_DT → 0 ticks");
+        // FIX 1 + FIX 2 compose: initial LOGIC_DT is within the 4× cap ceiling.
+        assert!(LOGIC_DT <= 4.0 * LOGIC_DT, "FIX 1 does not reduce the FIX 2 primed tick");
+    }
 }
 
 fn print_usage() {
@@ -199,13 +243,17 @@ fn run_window(
         t
     };
 
-    // Phase 1 static test pattern (fusion stand-in). Built ONCE — Phase 2 will fill these in-place
-    // each frame; the renderer is architected for no per-frame allocations.
-    let cell_count = ascii.cols() * ascii.rows();
-    let mut char_idx = vec![0u16; cell_count];
-    let mut bright16 = vec![0u16; cell_count];
-    let mut cga_idx = vec![0u8; cell_count];
-    fill_static(&mut char_idx, &mut bright16, &mut cga_idx, ascii.cols(), ascii.rows());
+    // Phase 2: Fusion replaces the Phase 1 static test pattern.
+    // DevAudioSource provides synthetic 120-BPM audio until cpal arrives in Phase 3.
+    let mut audio = audio_dev::DevAudioSource::new(512);
+    let charset: Vec<String> = ascii.charset().to_vec();  // clone once at startup
+    let mut fusion = fusion::Fusion::new(ascii.cols(), ascii.rows(), &charset);
+
+    // 30 Hz logic-tick accumulator (decoupled from display frame rate).
+    // Pre-load one tick so the first rendered frame is never all-black (FIX 2).
+    const LOGIC_DT: f32         = 1.0 / 30.0;
+    let mut logic_accum:    f32 = LOGIC_DT;
+    let mut last_logic_tick     = std::time::Instant::now();
 
     // ── M4 + M5 loop: run the core, then display the hardware FBO or the software frame ──
     'main: loop {
@@ -228,11 +276,47 @@ fn run_window(
                     params.bg_enabled = !params.bg_enabled;
                     eprintln!("[renderer] bg_enabled: {}", params.bg_enabled);
                 }
+                Event::Window { win_event: sdl2::event::WindowEvent::Resized(w, h), .. } => {
+                    unsafe { ascii.resize(&gfx.gl, w as u32, h as u32) };
+                    fusion.reset(ascii.cols(), ascii.rows());
+                    eprintln!("[renderer] resize {}x{} → grid {}x{}",
+                        w, h, ascii.cols(), ascii.rows());
+                }
                 _ => {}
             }
         }
 
         let (win_w, win_h) = gfx.window.size();
+
+        // ── 30 Hz logic tick(s) — run before rendering ───────────────────────
+        {
+            let now = std::time::Instant::now();
+            logic_accum += now.duration_since(last_logic_tick).as_secs_f32();
+            last_logic_tick = now;
+            // Cap catch-up to 4 ticks so a long shader-compile stall on the first
+            // (c.run)() call cannot trigger a spiral of accumulated fusion updates (FIX 1).
+            logic_accum = logic_accum.min(4.0 * LOGIC_DT);
+
+            while logic_accum >= LOGIC_DT {
+                // 1. Advance synthetic audio.
+                audio.tick();
+
+                // 2. Chroma beat envelope (mirrors sketch.js _chromaBeatCurrent update).
+                params.chroma_beat_current = params.chroma_beat_current * 0.85
+                    + audio.beat_intensity() * params.chroma_beat * 0.15;
+
+                // 3. Build the audio frame and run fusion.
+                let frame = fusion::AudioFrame {
+                    spectrum:       audio.spectrum(),
+                    bands:          audio.bands(),
+                    beat_active:    audio.beat_active(),
+                    beat_intensity: audio.beat_intensity(),
+                };
+                fusion.update(&frame, ascii.cols(), ascii.rows(), &params);
+
+                logic_accum -= LOGIC_DT;
+            }
+        }
 
         // Run one core frame (only once a game is loaded — running a core with no game crashes).
         if let (Some(c), true) = (&core, game_loaded) {
@@ -277,7 +361,7 @@ fn run_window(
             gfx.gl.viewport(0, 0, win_w as i32, win_h as i32);
             gfx.gl.clear_color(0.0, 0.0, 0.0, 1.0);
             gfx.gl.clear(glow::COLOR_BUFFER_BIT);
-            ascii.upload(&gfx.gl, &char_idx, &bright16, &cga_idx);
+            ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
             ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h);
         }
 
@@ -294,45 +378,6 @@ fn run_window(
         }
     }
     std::process::exit(0)
-}
-
-/// Phase 1 static test pattern — exercises every shader path (glyphs, phosphor ramp, CGA,
-/// empty cells) before fusion exists (Phase 2 replaces this).
-fn fill_static(char_idx: &mut [u16], bright16: &mut [u16], cga_idx: &mut [u8], cols: usize, rows: usize) {
-    let n = cols * rows;
-    // Default: mid-bright phosphor with a visible glyph.
-    for i in 0..n {
-        char_idx[i] = 3;
-        bright16[i] = 32767;
-        cga_idx[i] = 0;
-    }
-    // Row 0: fully bright, varied glyphs across the atlas.
-    for c in 0..cols {
-        char_idx[c] = (c % 30 + 10) as u16;
-        bright16[c] = 65535;
-        cga_idx[c] = 0;
-    }
-    // Rows 1-4, col 0: brightness ramp (tests the phosphor 3-stop).
-    for r in 1..rows.min(5) {
-        let i = r * cols;
-        char_idx[i] = 5;
-        bright16[i] = (r as f32 / 4.0 * 65535.0) as u16;
-        cga_idx[i] = 0;
-    }
-    // Rows 5-8: CGA diagonal band (tests all 15 palette entries).
-    for r in 5..rows.min(9) {
-        for c in 0..cols {
-            let i = r * cols + c;
-            cga_idx[i] = ((r + c) % 15 + 1) as u8;
-            bright16[i] = 49151;
-            char_idx[i] = 5;
-        }
-    }
-    // Col 0, rows 9+: empty cells (tests the empty-cell fast path).
-    for r in 9..rows {
-        char_idx[r * cols] = 0;
-        bright16[r * cols] = 0;
-    }
 }
 
 /// Upload a software (CPU) frame to `tex`, choosing the GL format from the libretro pixel format.

@@ -72,6 +72,19 @@
     // Symbolic chars confirmed present in ascii-art.js figures but outside the box-drawing block
     for (const ch of '†‡⌐⌘⌬◈◉◊★☽☾✓✦✧⟲') set.add(ch);
 
+    // ── Extended glyph palette ───────────────────────────────────────────────
+    // First group: glyphs referenced by ascii-art figures (previously rendered blank).
+    // The rest: a curated cyber / scientific-terminal set (Greek, math operators, arrows) that
+    // also feeds the glitch pool (V2FusionMode.GLI_CHARS) for a richer data-corruption look.
+    const extendedGlyphs =
+      '▶∞Ωμ∑→σ' +                            // referenced by ascii-art figures
+      'αβγδεζθλμπρστφχψω' +                   // Greek lowercase
+      'ΓΔΘΛΞΠΣΦΨΩ' +                          // Greek uppercase
+      '∂∇∆√∫∏≈≠≡≤≥±×÷∈∉∅∴∵' +               // math operators
+      '←↑↓↔↕⇐⇒⇑⇓⇔' +                         // arrows
+      '◀◢◣◤◥☆';                              // geometric accents
+    for (const ch of extendedGlyphs) set.add(ch);
+
     const charset = [...set];
 
     // Dev-mode validator: warn about any ascii-art chars missing from the just-built charset.
