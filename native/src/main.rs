@@ -18,6 +18,7 @@ use std::process::ExitCode;
 struct Args {
     core: Option<PathBuf>,
     rom: Option<PathBuf>,
+    demo: bool,
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -82,20 +83,23 @@ mod tests {
 }
 
 fn print_usage() {
-    eprintln!("usage: crt-vizzie-spike [--core <libretro-core>] [--rom <rom>]");
-    eprintln!("  no args  -> M0 (magenta window)");
-    eprintln!("  --core   -> M0 + M1 (also load the core and print its system info)");
-    eprintln!("  --rom    -> consumed starting at M3 (load_game)");
+    eprintln!("usage: crt-vizzie-spike [--core <libretro-core>] [--rom <rom>] [--demo-mode]");
+    eprintln!("  no args     -> M0 (magenta window)");
+    eprintln!("  --core      -> M0 + M1 (also load the core and print its system info)");
+    eprintln!("  --rom       -> consumed starting at M3 (load_game)");
+    eprintln!("  --demo-mode -> synthetic animated source, ignores audio input");
 }
 
 fn parse_args() -> Args {
     let mut core = None;
     let mut rom = None;
+    let mut demo = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--core" => core = it.next().map(PathBuf::from),
             "--rom" => rom = it.next().map(PathBuf::from),
+            "--demo-mode" => demo = true,
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -103,7 +107,7 @@ fn parse_args() -> Args {
             other => eprintln!("[spike] ignoring unknown arg: {other}"),
         }
     }
-    Args { core, rom }
+    Args { core, rom, demo }
 }
 
 fn main() -> ExitCode {
@@ -134,7 +138,7 @@ fn main() -> ExitCode {
     };
 
     // ── M0: window + GLES3 context + clear loop ──────────────────────────────
-    if let Err(e) = run_window(core, args.rom) {
+    if let Err(e) = run_window(core, args.rom, args.demo) {
         eprintln!("[spike] fatal: {e}");
         return ExitCode::FAILURE;
     }
@@ -144,6 +148,7 @@ fn main() -> ExitCode {
 fn run_window(
     core: Option<libretro::Core>,
     rom: Option<PathBuf>,
+    demo: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use glow::HasContext;
 
@@ -244,8 +249,9 @@ fn run_window(
         t
     };
 
-    // Phase 3: try to open the default cpal input; falls back to synthetic DevAudioSource.
-    let mut audio = audio::new_source();
+    // Phase 3: --demo-mode → synthetic source; else open default cpal input, falling back to
+    // a silent (blank/idle) source if no device is available.
+    let mut audio = audio::new_source(demo);
     let charset: Vec<String> = ascii.charset().to_vec();  // clone once at startup
     let mut fusion = fusion::Fusion::new(ascii.cols(), ascii.rows(), &charset);
 

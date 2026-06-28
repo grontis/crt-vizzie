@@ -304,21 +304,59 @@ impl AudioSource for CpalAudioSource {
     fn is_live(&self) -> bool                   { true }
 }
 
+// ── Silent (blank) source ───────────────────────────────────────────────────────
+
+/// A do-nothing source: zeroed spectrum/bands, never beats. Reports `is_live() == true`
+/// so the calm-idle envelope settles the visualizer into its resting state (held figure +
+/// faint drift) rather than the forced-lively demo. Used when no audio device is available,
+/// so a capture failure looks visibly "silent" instead of masquerading as a working demo.
+pub struct SilentAudioSource {
+    spectrum: Vec<f32>,
+    bands:    crate::audio_dev::Bands,
+}
+
+impl SilentAudioSource {
+    pub fn new() -> Self {
+        Self { spectrum: vec![0.0_f32; FFT_BINS], bands: crate::audio_dev::Bands::default() }
+    }
+}
+
+impl Default for SilentAudioSource {
+    fn default() -> Self { Self::new() }
+}
+
+impl AudioSource for SilentAudioSource {
+    fn update(&mut self)                        {}
+    fn spectrum(&self) -> &[f32]                { &self.spectrum }
+    fn bands(&self) -> crate::audio_dev::Bands  { self.bands }
+    fn beat_active(&self) -> bool               { false }
+    fn beat_intensity(&self) -> f32             { 0.0 }
+    fn is_live(&self) -> bool                   { true }
+}
+
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-/// Open a real cpal audio source. Falls back silently to the synthetic `DevAudioSource`
-/// if no default input device is available or the stream fails to start.
+/// Build the audio source:
+/// - `demo == true` (`--demo-mode`): skip the audio device entirely and run the synthetic
+///   `DevAudioSource` — animates regardless of any audio input.
+/// - otherwise: open the default cpal input. If none is available or the stream fails, fall
+///   back to a `SilentAudioSource` so the visualizer shows its idle (silent) state — NOT the
+///   demo — making a capture failure visually obvious while troubleshooting input.
 ///
 /// Callers hold `Box<dyn AudioSource>` and call `update()` once per 30 Hz tick.
-pub fn new_source() -> Box<dyn AudioSource> {
+pub fn new_source(demo: bool) -> Box<dyn AudioSource> {
+    if demo {
+        eprintln!("[audio] --demo-mode: synthetic source active (audio input ignored)");
+        return Box::new(crate::audio_dev::DevAudioSource::new(FFT_BINS));
+    }
     match CpalAudioSource::try_new() {
         Ok(src) => {
             eprintln!("[audio] cpal source active");
             Box::new(src)
         }
         Err(e) => {
-            eprintln!("[audio] cpal init failed: {e}; using synthetic fallback");
-            Box::new(crate::audio_dev::DevAudioSource::new(FFT_BINS))
+            eprintln!("[audio] cpal init failed: {e}; no audio input — showing idle (silent) state");
+            Box::new(SilentAudioSource::new())
         }
     }
 }
@@ -417,6 +455,20 @@ fn build_input_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The blank fallback source outputs nothing but reports `is_live() == true`, so the
+    /// calm-idle envelope drives the resting state instead of the forced-lively demo path.
+    #[test]
+    fn silent_source_is_zeroed_and_live() {
+        let mut s = SilentAudioSource::new();
+        s.update();
+        assert_eq!(s.spectrum().len(), FFT_BINS);
+        assert!(s.spectrum().iter().all(|&v| v == 0.0), "spectrum must be all zeros");
+        let b = s.bands();
+        assert_eq!([b.sub, b.bass, b.low_mid, b.mid, b.high_mid, b.treble], [0.0; 6]);
+        assert!(!s.beat_active() && s.beat_intensity() == 0.0, "must never beat");
+        assert!(s.is_live(), "must report live so calm-idle (not demo) handles the silence");
+    }
 
     /// Validates the band bin-edge math matches the JS reference (_computeBands, audio.js 367–375).
     /// Sets exactly one bin per band to 1.0; asserts the average equals 1/band_width.
