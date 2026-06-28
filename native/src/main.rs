@@ -311,6 +311,7 @@ fn run_window(
                     bands:          audio.bands(),
                     beat_active:    audio.beat_active(),
                     beat_intensity: audio.beat_intensity(),
+                    live:           audio.is_live(),
                 };
                 fusion.update(&frame, ascii.cols(), ascii.rows(), &params);
 

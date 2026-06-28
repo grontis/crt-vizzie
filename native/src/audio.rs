@@ -22,6 +22,9 @@ pub trait AudioSource {
     fn beat_active(&self) -> bool;
     /// Decaying beat intensity in [0, 1].
     fn beat_intensity(&self) -> f32;
+    /// Returns `true` for real cpal capture, `false` for the synthetic `DevAudioSource` fallback.
+    /// Used by `fusion.rs` to decide whether to apply the calm-idle activity envelope.
+    fn is_live(&self) -> bool;
 }
 
 // ── pub(crate) helpers — testable without a cpal device ──────────────────────
@@ -238,8 +241,18 @@ impl AudioSource for CpalAudioSource {
             let excess = self.sample_buf.len() - FFT_SIZE;
             self.sample_buf.drain(0..excess);
         }
+        // Debug instrumentation (env-gated, ~1×/sec). Run with CRT_AUDIO_DEBUG=1 to enable.
+        let audio_dbg = (self.now_ms % 1000.0) < (1000.0 / 30.0)
+            && std::env::var("CRT_AUDIO_DEBUG").is_ok();
+
         // Not enough data yet — all outputs stay at zero.
-        if self.sample_buf.len() < FFT_SIZE { return; }
+        if self.sample_buf.len() < FFT_SIZE {
+            if audio_dbg {
+                eprintln!("[audiodbg] WARMUP buf={}/{} — if this never grows, no samples are being captured",
+                    self.sample_buf.len(), FFT_SIZE);
+            }
+            return;
+        }
 
         // 2. Apply Blackman window → fill fft_input.
         for i in 0..FFT_SIZE {
@@ -256,7 +269,11 @@ impl AudioSource for CpalAudioSource {
         for i in 0..FFT_BINS {
             let re  = self.fft_input[i].re;
             let im  = self.fft_input[i].im;
-            let mag = (re * re + im * im).sqrt();
+            // rustfft is unnormalized; divide by FFT_SIZE to match the Web Audio
+            // AnalyserNode magnitude scale that v2/audio.js's dB mapping assumes.
+            // Without this the magnitudes are ~N× too large (~+54 dB) and nearly
+            // every bin saturates to 1.0 after the (dB + 90) / 80 mapping.
+            let mag = (re * re + im * im).sqrt() / FFT_SIZE as f32;
             self.smooth_mag[i] = FFT_SMOOTHING * self.smooth_mag[i]
                 + (1.0 - FFT_SMOOTHING) * mag;
             let db = 20.0 * self.smooth_mag[i].max(1e-10_f32).log10();
@@ -266,12 +283,25 @@ impl AudioSource for CpalAudioSource {
         // 5. Compute bands and detect beat.
         self.compute_bands();
         self.detect_beat();
+
+        if audio_dbg {
+            let spec_max  = self.spectrum.iter().copied().fold(0.0_f32, f32::max);
+            let spec_mean = self.spectrum.iter().sum::<f32>() / self.spectrum.len() as f32;
+            let b = &self.bands;
+            eprintln!(
+                "[audiodbg] buf={} spec_max={:.3} spec_mean={:.3} | sub={:.2} bass={:.2} lmid={:.2} mid={:.2} hmid={:.2} treb={:.2} | beat={} ({:.2})",
+                self.sample_buf.len(), spec_max, spec_mean,
+                b.sub, b.bass, b.low_mid, b.mid, b.high_mid, b.treble,
+                self.beat_active, self.beat_intensity,
+            );
+        }
     }
 
     fn spectrum(&self) -> &[f32]                { &self.spectrum }
     fn bands(&self) -> crate::audio_dev::Bands  { self.bands }
     fn beat_active(&self) -> bool               { self.beat_active }
     fn beat_intensity(&self) -> f32             { self.beat_intensity }
+    fn is_live(&self) -> bool                   { true }
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────

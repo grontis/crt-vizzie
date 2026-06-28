@@ -22,13 +22,15 @@ struct PulseWave {
     color_base: u8,
 }
 
-/// Audio data consumed by `Fusion::update`. Built in `main.rs` from `DevAudioSource`.
-/// Swapping to cpal in Phase 3 only requires changing one line in main.rs.
+/// Audio data consumed by `Fusion::update`. Built in `main.rs` each 30 Hz tick.
 pub struct AudioFrame<'a> {
     pub spectrum:       &'a [f32],
     pub bands:          crate::audio_dev::Bands,
     pub beat_active:    bool,
     pub beat_intensity: f32,
+    /// `true` for real cpal capture; `false` for the synthetic `DevAudioSource` fallback.
+    /// When `false`, the calm-idle activity envelope is forced to 1.0 (demo stays lively).
+    pub live:           bool,
 }
 
 // ── Free helper functions (avoid borrowing conflicts in update) ───────────────
@@ -275,6 +277,9 @@ pub struct Fusion {
 
     // one-time warn set for missing chars
     warned_missing: HashSet<char>,
+
+    // calm-idle activity envelope (native-only; 0 = idle, 1 = fully lively)
+    activity: f32,
 }
 
 impl Fusion {
@@ -338,6 +343,7 @@ impl Fusion {
             pulse_waves:       Vec::new(),
             now_ms: 0.0, last_beat_ms: 0.0, beat_interval: 600.0, prev_beat_active: false,
             rng, warned_missing,
+            activity: 0.0,
         }
     }
 
@@ -388,7 +394,14 @@ impl Fusion {
             &self.char_map, &mut self.warned_missing,
             cols, rows, 0.65,
         );
+
+        // Reset calm-idle activity envelope
+        self.activity = 0.0;
     }
+
+    /// Current calm-idle activity level in [0, 1].
+    /// 0 = fully idle (silence), 1 = fully lively (loud audio or fallback source).
+    pub fn activity(&self) -> f32 { self.activity }
 
     /// One 30 Hz logic tick: update all layer state, then composite into
     /// `self.char_idx` / `self.bright16` / `self.cga_idx`.
@@ -408,6 +421,41 @@ impl Fusion {
 
         // ── Timing and beat tracking ──────────────────────────────────────────
         self.now_ms += 1000.0 / 30.0;
+
+        // ── Calm-idle activity envelope (native-only, no v2 parity) ──────────
+        // DevAudioSource (demo/fallback) is forced to 1.0 so demo mode stays fully
+        // lively. CpalAudioSource uses a broadband energy level with an asymmetric
+        // attack/release envelope: fast up (audio onset), slow down (motion lingers).
+        let activity_target = if !audio.live {
+            1.0_f32 // fallback / demo source is always fully lively
+        } else {
+            let band_mean = (audio.bands.sub + audio.bands.bass + audio.bands.low_mid
+                           + audio.bands.mid + audio.bands.high_mid + audio.bands.treble) / 6.0;
+            // Subtract noise floor so mic hiss maps to 0.
+            // Guard the denominator: idle_noise_floor is 0.06 today, but Params is a
+            // pub struct the hardware bridge may write, so clamp away the 1.0 (÷0 → NaN)
+            // and >1.0 (sign-inversion) cases.
+            let denom = (1.0 - params.idle_noise_floor).max(f32::EPSILON);
+            let level = ((band_mean - params.idle_noise_floor) / denom).clamp(0.0, 1.0);
+            // Beats bump activity even if broadband level is modest.
+            level.max(audio.beat_intensity * 0.6)
+        };
+        let rate = if activity_target > self.activity {
+            params.activity_attack
+        } else {
+            params.activity_release
+        };
+        self.activity = (self.activity + (activity_target - self.activity) * rate).clamp(0.0, 1.0);
+        let activity = self.activity; // local copy for use in this tick
+
+        // Debug instrumentation (env-gated, ~1×/sec). Run with CRT_AUDIO_DEBUG=1 to enable.
+        if audio.live
+            && (self.now_ms % 1000.0) < (1000.0 / 30.0)
+            && std::env::var("CRT_AUDIO_DEBUG").is_ok()
+        {
+            eprintln!("[idledbg] target={:.3} activity={:.3} beat_int={:.2}",
+                activity_target, activity, audio.beat_intensity);
+        }
 
         let beat_rising_edge = audio.beat_active && !self.prev_beat_active;
         self.prev_beat_active = audio.beat_active;
@@ -433,39 +481,46 @@ impl Fusion {
 
         // ── Phase 1: Figure layer state ───────────────────────────────────────
         if params.fig_enabled {
-            self.seed_timer += 1;
-            let force_reseed = audio.beat_active && audio.beat_intensity > 0.85 && self.seed_timer > 40;
-            if self.seed_timer >= params.fig_reseed_frames || force_reseed {
-                self.seed_timer = 0;
-                stamp_figure(
-                    &mut self.rng, &mut self.figure_bright, &mut self.figure_char,
-                    &self.char_map, &mut self.warned_missing,
-                    cols, rows, params.fig_brightness,
-                );
-            }
+            // Calm-idle: when resting, hold the current figure static (no reseed, no decay/smear).
+            // The figure is the coherent centerpiece — it should persist frozen at idle.
+            // Beat-triggered force_reseed is intentionally blocked while resting (a beat means
+            // activity is high anyway, so in practice resting=false whenever beats fire).
+            let figure_resting = activity < params.idle_active_gate;
+            if !figure_resting {
+                self.seed_timer += 1;
+                let force_reseed = audio.beat_active && audio.beat_intensity > 0.85 && self.seed_timer > 40;
+                if self.seed_timer >= params.fig_reseed_frames || force_reseed {
+                    self.seed_timer = 0;
+                    stamp_figure(
+                        &mut self.rng, &mut self.figure_bright, &mut self.figure_char,
+                        &self.char_map, &mut self.warned_missing,
+                        cols, rows, params.fig_brightness,
+                    );
+                }
 
-            let total_energy = ((audio.bands.bass + audio.bands.mid + audio.bands.treble) / 3.0).max(0.1);
-            let decay        = params.fig_decay * (0.5 + 0.5 * total_energy);
-            let smear_chance = params.fig_smear * audio.bands.bass.max(0.3);
+                let total_energy = ((audio.bands.bass + audio.bands.mid + audio.bands.treble) / 3.0).max(0.1);
+                let decay        = params.fig_decay * (0.5 + 0.5 * total_energy);
+                let smear_chance = params.fig_smear * audio.bands.bass.max(0.3);
 
-            // Iterate row-major so the rightward smear can cascade (matches JS in-place).
-            for i in 0..n {
-                let c = i % cols;
-                let brt = self.figure_bright[i];
-                let new_brt = (brt - decay).max(0.0);
-                self.figure_bright[i] = new_brt;
+                // Iterate row-major so the rightward smear can cascade (matches JS in-place).
+                for i in 0..n {
+                    let c = i % cols;
+                    let brt = self.figure_bright[i];
+                    let new_brt = (brt - decay).max(0.0);
+                    self.figure_bright[i] = new_brt;
 
-                // Horizontal smear — writes idx+1 in-place (cascade intended)
-                if new_brt > 0.08
-                    && self.figure_char[i] != 0
-                    && c + 1 < cols
-                {
-                    let smear_roll = self.rng.rand();
-                    if smear_roll < smear_chance {
-                        let ni = i + 1;
-                        if self.figure_bright[ni] < new_brt * 0.6 {
-                            self.figure_char[ni]  = self.figure_char[i];
-                            self.figure_bright[ni] = new_brt * 0.5;
+                    // Horizontal smear — writes idx+1 in-place (cascade intended)
+                    if new_brt > 0.08
+                        && self.figure_char[i] != 0
+                        && c + 1 < cols
+                    {
+                        let smear_roll = self.rng.rand();
+                        if smear_roll < smear_chance {
+                            let ni = i + 1;
+                            if self.figure_bright[ni] < new_brt * 0.6 {
+                                self.figure_char[ni]  = self.figure_char[i];
+                                self.figure_bright[ni] = new_brt * 0.5;
+                            }
                         }
                     }
                 }
@@ -482,6 +537,11 @@ impl Fusion {
                 }
             }
 
+            // Calm-idle: scale positional advance so rain crawls at idle (doesn't stop).
+            // Speed targets are left unchanged — only how far the head actually moves.
+            let rain_advance_scale = params.idle_rain_floor
+                + (1.0 - params.idle_rain_floor) * activity;
+
             for c in 0..cols {
                 if !audio.beat_active {
                     let log_frac = self.rain[c].bin_frac.powf(1.8);
@@ -493,7 +553,7 @@ impl Fusion {
                     self.rain[c].speed  = self.rain[c].speed.max(params.rain_speed_min * 0.5);
                 }
 
-                self.rain[c].head_y += self.rain[c].speed;
+                self.rain[c].head_y += self.rain[c].speed * rain_advance_scale;
                 if self.rain[c].head_y > rows as f32 + params.rain_trail as f32 {
                     self.rain[c].head_y = self.rng.rand() * -10.0;
                     self.rain[c].speed  = params.rain_speed_min
@@ -520,7 +580,9 @@ impl Fusion {
                 self.wave_thresh_boost = (self.wave_thresh_boost
                     + params.wave_thresh_drop * audio.beat_intensity).min(0.5);
             }
-            self.wave_time       += params.wave_speed + self.wave_beat_boost;
+            // Calm-idle: autonomous advance is scaled by activity so the wave nearly
+            // freezes at silence. Beat boost is kept as-is (≈0 at silence naturally).
+            self.wave_time       += params.wave_speed * activity + self.wave_beat_boost;
             self.wave_beat_boost   = (self.wave_beat_boost   - params.wave_beat_decay).max(0.0);
             self.wave_thresh_boost = (self.wave_thresh_boost - params.wave_beat_decay * 0.7).max(0.0);
         }
@@ -534,28 +596,35 @@ impl Fusion {
             };
             let scaled_intensity = (audio.beat_intensity * params.glitch_intensity_scale).min(1.0);
 
-            // Timer-based seeding
-            self.glitch_seed_timer += 1;
-            if self.glitch_seed_timer >= params.glitch_seed_interval
-                || (audio.beat_active && self.glitch_seed_timer > params.glitch_beat_seed_min)
-            {
-                self.glitch_seed_timer = 0;
-                let choice = (self.rng.rand() * 3.0) as u32;
-                match choice {
-                    0 => seed_hex_dump(
-                        &mut self.rng,
-                        &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
-                        &self.char_map, cols, rows,
-                    ),
-                    1 => seed_from_spectrum(
-                        &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
-                        audio.spectrum, &self.char_map, cols, rows,
-                    ),
-                    _ => seed_glitch_figure(
-                        &mut self.rng,
-                        &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
-                        &self.char_map, &mut self.warned_missing, cols, rows,
-                    ),
+            // Calm-idle: when resting, do NOT advance the seed timer or trigger new seeds.
+            // The decay suite below always runs so any leftover glitch fades out cleanly.
+            // Beat-triggered scatter/blast/pulse is already gated by beat_active ≈ false
+            // at silence, so no additional guard is needed there.
+            let glitch_resting = activity < params.idle_active_gate;
+            if !glitch_resting {
+                // Timer-based seeding
+                self.glitch_seed_timer += 1;
+                if self.glitch_seed_timer >= params.glitch_seed_interval
+                    || (audio.beat_active && self.glitch_seed_timer > params.glitch_beat_seed_min)
+                {
+                    self.glitch_seed_timer = 0;
+                    let choice = (self.rng.rand() * 3.0) as u32;
+                    match choice {
+                        0 => seed_hex_dump(
+                            &mut self.rng,
+                            &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
+                            &self.char_map, cols, rows,
+                        ),
+                        1 => seed_from_spectrum(
+                            &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
+                            audio.spectrum, &self.char_map, cols, rows,
+                        ),
+                        _ => seed_glitch_figure(
+                            &mut self.rng,
+                            &mut self.glitch_bright, &mut self.glitch_char, &mut self.glitch_cga_idx,
+                            &self.char_map, &mut self.warned_missing, cols, rows,
+                        ),
+                    }
                 }
             }
 
@@ -755,6 +824,9 @@ impl Fusion {
             let t         = self.wave_time;
             let threshold = (params.wave_threshold - self.wave_thresh_boost).max(0.1);
             let op        = params.wave_opacity;
+            // Calm-idle: dim the wave layer at idle so it fades gracefully rather than
+            // cutting out. idle_wave_dim is the floor brightness fraction (e.g. 0.20 = 20%).
+            let wave_bright_scale = params.idle_wave_dim + (1.0 - params.idle_wave_dim) * activity;
             let bass_e    = audio.bands.bass;
             let treble_e  = audio.bands.treble;
             let mid_e     = audio.bands.mid;
@@ -792,7 +864,7 @@ impl Fusion {
                         set_cell_by_idx(
                             &mut self.char_idx, &mut self.bright16, &mut self.cga_idx,
                             idx, wave_ch,
-                            (norm - threshold) / (1.0 - threshold) * op,
+                            (norm - threshold) / (1.0 - threshold) * op * wave_bright_scale,
                             0,
                         );
                     }
@@ -938,7 +1010,7 @@ mod tests {
         let spectrum = vec![0.0f32; 512];
         let bands = crate::audio_dev::Bands::default();
         let params = crate::config::Params::default();
-        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0, live: false };
         fusion.update(&frame, 3, 3, &params);
         // If we reach here, no OOB panic occurred.
         assert_eq!(fusion.char_idx.len(), 9, "buffer length must not change after tiny-grid tick");
@@ -956,20 +1028,20 @@ mod tests {
 
         // Two ticks with no beat
         for _ in 0..2 {
-            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0, live: false };
             fusion.update(&frame, 10, 8, &params);
         }
         // Simulate a beat
-        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.8 };
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.8, live: false };
         fusion.update(&frame, 10, 8, &params);
         // After one beat, last_beat_ms should be > 0
         assert!(fusion.now_ms > 0.0, "now_ms should advance each tick");
         // Simulate a second beat after a gap
         for _ in 0..8 {
-            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0, live: false };
             fusion.update(&frame, 10, 8, &params);
         }
-        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.7 };
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.7, live: false };
         fusion.update(&frame, 10, 8, &params);
         // beat_interval EWMA should have updated from 600 ms (it starts at 600;
         // after one valid interval it shifts toward the measured interval).
@@ -999,14 +1071,14 @@ mod tests {
 
         // Run ticks with no beat — layers should update without panicking.
         for _ in 0..15 {
-            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0, live: false };
             fusion.update(&frame, cols, rows, &params);
         }
         assert_eq!(fusion.char_idx.len(), n, "buffer length changed after silent ticks");
 
         // Run ticks with an active beat — all beat-reactive paths exercise.
         for _ in 0..10 {
-            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.9 };
+            let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: true, beat_intensity: 0.9, live: false };
             fusion.update(&frame, cols, rows, &params);
         }
         assert_eq!(fusion.char_idx.len(), n, "buffer length changed after beat ticks");
@@ -1021,8 +1093,194 @@ mod tests {
         // Test resize: reset to a different grid, run a tick.
         fusion.reset(30, 15);
         assert_eq!(fusion.char_idx.len(), 30 * 15);
-        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0 };
+        let frame = AudioFrame { spectrum: &spectrum, bands, beat_active: false, beat_intensity: 0.0, live: false };
         fusion.update(&frame, 30, 15, &params);
         assert_eq!(fusion.char_idx.len(), 30 * 15);
+    }
+
+    // ── Calm-idle tests ───────────────────────────────────────────────────────
+
+    /// With live=true and all-zero audio, activity decays from 0 and stays near 0.
+    /// After 100 silent ticks the envelope must be ≤ 0.05.
+    #[test]
+    fn activity_envelope_decays_on_silence() {
+        let charset = make_charset();
+        let mut fusion = Fusion::new(20, 10, &charset);
+        let spectrum = vec![0.0f32; 512];
+        let bands    = crate::audio_dev::Bands::default(); // all zeros
+        let params   = crate::config::Params::default();
+
+        for _ in 0..100 {
+            let frame = AudioFrame {
+                spectrum: &spectrum,
+                bands,
+                beat_active: false,
+                beat_intensity: 0.0,
+                live: true,
+            };
+            fusion.update(&frame, 20, 10, &params);
+        }
+        assert!(
+            fusion.activity() <= 0.05,
+            "activity should be near 0 after 100 silent live ticks, got {}",
+            fusion.activity()
+        );
+    }
+
+    /// From activity ≈ 0, one tick of loud audio raises activity MORE than one tick of
+    /// silence from activity ≈ 1.0 lowers it (validates attack rate > release rate).
+    #[test]
+    fn activity_attack_faster_than_release() {
+        let charset  = make_charset();
+        let spectrum = vec![0.9f32; 512];
+        let params   = crate::config::Params::default();
+
+        // Measure attack: fresh fusion (activity=0) → one loud tick.
+        let bands_loud = crate::audio_dev::Bands {
+            sub: 0.9, bass: 0.9, low_mid: 0.9, mid: 0.9, high_mid: 0.9, treble: 0.9,
+        };
+        let mut fusion_attack = Fusion::new(20, 10, &charset);
+        let frame_loud = AudioFrame {
+            spectrum: &spectrum,
+            bands: bands_loud,
+            beat_active: false,
+            beat_intensity: 0.0,
+            live: true,
+        };
+        fusion_attack.update(&frame_loud, 20, 10, &params);
+        let delta_up = fusion_attack.activity(); // rose from 0.0
+
+        // Measure release: drive activity to 1.0 (live=false), then one silent live tick.
+        let bands_zero = crate::audio_dev::Bands::default();
+        let mut fusion_release = Fusion::new(20, 10, &charset);
+        for _ in 0..50 {
+            let frame_dev = AudioFrame {
+                spectrum: &spectrum,
+                bands: bands_zero,
+                beat_active: false,
+                beat_intensity: 0.0,
+                live: false, // forces activity_target = 1.0
+            };
+            fusion_release.update(&frame_dev, 20, 10, &params);
+        }
+        assert!(
+            fusion_release.activity() > 0.99,
+            "activity should be ≈1.0 after 50 fallback ticks, got {}",
+            fusion_release.activity()
+        );
+        let before_release = fusion_release.activity();
+        let frame_silent = AudioFrame {
+            spectrum: &spectrum,
+            bands: bands_zero,
+            beat_active: false,
+            beat_intensity: 0.0,
+            live: true, // now live + silent → should fall
+        };
+        fusion_release.update(&frame_silent, 20, 10, &params);
+        let delta_down = before_release - fusion_release.activity();
+
+        assert!(
+            delta_up > delta_down,
+            "attack delta ({delta_up:.4}) must exceed release delta ({delta_down:.4})"
+        );
+    }
+
+    /// With live=false (synthetic fallback), activity is forced to 1.0 regardless
+    /// of band energy — demo mode must stay fully animated.
+    #[test]
+    fn fallback_source_forces_activity_to_one() {
+        let charset  = make_charset();
+        let spectrum = vec![0.0f32; 512];
+        let bands    = crate::audio_dev::Bands::default(); // all zeros — no real audio
+        let params   = crate::config::Params::default();
+        let mut fusion = Fusion::new(20, 10, &charset);
+
+        for _ in 0..30 {
+            let frame = AudioFrame {
+                spectrum: &spectrum,
+                bands,
+                beat_active: false,
+                beat_intensity: 0.0,
+                live: false, // DevAudioSource path → must force to 1.0
+            };
+            fusion.update(&frame, 20, 10, &params);
+        }
+        assert!(
+            fusion.activity() > 0.99,
+            "fallback source must converge activity to 1.0, got {}",
+            fusion.activity()
+        );
+    }
+
+    /// Exercises the idle gate from BOTH sides so it can't pass trivially:
+    ///   - while ACTIVE (loud audio) the gate is open → glitch_seed_timer advances;
+    ///   - after settling into idle (silence) the gate closes → wave_time freezes and
+    ///     glitch_seed_timer stops advancing (seeding gated).
+    #[test]
+    fn idle_suppresses_autonomous_motion() {
+        let charset = make_charset();
+        let params  = crate::config::Params::default();
+        let mut fusion = Fusion::new(20, 10, &charset);
+
+        let loud_spec = vec![1.0f32; 512];
+        let loud = crate::audio_dev::Bands {
+            sub: 1.0, bass: 1.0, low_mid: 1.0, mid: 1.0, high_mid: 1.0, treble: 1.0,
+        };
+        let silent_spec = vec![0.0f32; 512];
+        let silent = crate::audio_dev::Bands::default();
+
+        // ── Active phase: gate OPEN — timer must advance ───────────────────────
+        for _ in 0..5 {
+            let frame = AudioFrame {
+                spectrum: &loud_spec, bands: loud,
+                beat_active: false, beat_intensity: 0.0, live: true,
+            };
+            fusion.update(&frame, 20, 10, &params);
+        }
+        assert!(
+            fusion.activity() > params.idle_active_gate,
+            "should be active after loud ticks, got {}", fusion.activity()
+        );
+        assert!(
+            fusion.glitch_seed_timer > 0,
+            "glitch_seed_timer must advance while active (gate open), got 0"
+        );
+
+        // ── Settle into idle: gate CLOSED ──────────────────────────────────────
+        // Slow release (0.02) means activity decays geometrically; run enough silent
+        // ticks that it bleeds to ~0 so the wave is genuinely frozen (not just slowed).
+        for _ in 0..500 {
+            let frame = AudioFrame {
+                spectrum: &silent_spec, bands: silent,
+                beat_active: false, beat_intensity: 0.0, live: true,
+            };
+            fusion.update(&frame, 20, 10, &params);
+        }
+        assert!(
+            fusion.activity() < params.idle_active_gate,
+            "activity should be below idle_active_gate after silence, got {}", fusion.activity()
+        );
+
+        // Capture state, then run one more silent tick.
+        let wave_time_before    = fusion.wave_time;
+        let glitch_timer_before = fusion.glitch_seed_timer;
+        let frame = AudioFrame {
+            spectrum: &silent_spec, bands: silent,
+            beat_active: false, beat_intensity: 0.0, live: true,
+        };
+        fusion.update(&frame, 20, 10, &params);
+
+        // Wave frozen: advance ≈ wave_speed * 0 + wave_beat_boost(=0) = 0.
+        let wave_advance = (fusion.wave_time - wave_time_before).abs();
+        assert!(
+            wave_advance < 1e-4,
+            "wave_time should not advance at idle, advanced by {wave_advance}"
+        );
+        // Glitch seeding gated: timer frozen while resting.
+        assert_eq!(
+            fusion.glitch_seed_timer, glitch_timer_before,
+            "glitch_seed_timer must not advance while resting (was {glitch_timer_before}, now {})",
+            fusion.glitch_seed_timer
+        );
     }
 }

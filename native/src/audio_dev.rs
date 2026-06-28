@@ -139,6 +139,7 @@ impl AudioSource for DevAudioSource {
     fn bands(&self) -> Bands                  { self.bands }
     fn beat_active(&self) -> bool             { self.beat_active }
     fn beat_intensity(&self) -> f32           { self.beat_intensity }
+    fn is_live(&self) -> bool                 { false }
 }
 
 #[cfg(test)]

@@ -54,6 +54,20 @@ pub struct Params {
     pub glitch_treble_floor: f32,        // glitchTrebleFloor: 0.15
     pub glitch_beat_seed_min: u32,       // glitchBeatSeedMin: 12
     pub glitch_intensity_scale: f32,     // glitchIntensityScale: 1.5
+
+    // ── Calm-idle (native-only) ───────────────────────────────────────────────
+    /// Broadband level below this maps to "silent" (mic hiss stays idle). Default: 0.06.
+    pub idle_noise_floor:  f32,
+    /// Activity envelope rise rate (fast attack on audio onset). Default: 0.35.
+    pub activity_attack:   f32,
+    /// Activity envelope fall rate (slow release when audio stops). Default: 0.02.
+    pub activity_release:  f32,
+    /// Below this activity level, figure holds static and glitch stops seeding. Default: 0.15.
+    pub idle_active_gate:  f32,
+    /// Rain drift fraction at full idle (rain crawls rather than stopping). Default: 0.04.
+    pub idle_rain_floor:   f32,
+    /// Wave brightness floor at full idle (wave dims rather than disappearing). Default: 0.20.
+    pub idle_wave_dim:     f32,
 }
 
 impl Default for Params {
@@ -115,6 +129,14 @@ impl Default for Params {
             glitch_treble_floor: 0.15,
             glitch_beat_seed_min: 12,
             glitch_intensity_scale: 1.5,
+
+            // Calm-idle (native-only)
+            idle_noise_floor: 0.06,
+            activity_attack:  0.35,
+            activity_release: 0.02,
+            idle_active_gate: 0.15,
+            idle_rain_floor:  0.04,
+            idle_wave_dim:    0.20,
         }
     }
 }
@@ -268,6 +290,15 @@ mod tests {
         assert_eq!(p.glitch_treble_floor,      0.15_f32,  "glitchTrebleFloor");
         assert_eq!(p.glitch_beat_seed_min,     12u32,   "glitchBeatSeedMin");
         assert_eq!(p.glitch_intensity_scale,   1.5_f32,  "glitchIntensityScale");
+
+        // Calm-idle activity envelope (native-only — no JS reference; guards against
+        // a default being fat-fingered onto the wrong field during tuning).
+        assert_eq!(p.idle_noise_floor, 0.06_f32, "idleNoiseFloor");
+        assert_eq!(p.activity_attack,  0.35_f32, "activityAttack");
+        assert_eq!(p.activity_release, 0.02_f32, "activityRelease");
+        assert_eq!(p.idle_active_gate, 0.15_f32, "idleActiveGate");
+        assert_eq!(p.idle_rain_floor,  0.04_f32, "idleRainFloor");
+        assert_eq!(p.idle_wave_dim,    0.20_f32, "idleWaveDim");
     }
 
     /// KATAKANA must have exactly 121 entries: 96 katakana (U+30A0..=U+30FF) +
