@@ -129,9 +129,11 @@ shader.
   fills the data textures every frame; the shader fetches each cell's glyph/brightness/color as
   usual, then multiplies brightness by an edge factor: a cell-scale Sobel on `u_gameTex` (sample
   offsets = `1/gridSize`, so the mask matches the glyph grid, not per-texel noise) →
-  `clamp((mag - u_edgeThreshold) * u_edgeGain, 0, 1)`. So the rain/wave/glitch/figure only show
-  along the on-screen shapes, carving the game's contours out of the animation, screen-blended
-  over the live game via the same composite as Fusion mode (**B** toggles the underlay off).
+  `clamp((mag - u_edgeThreshold) * u_edgeGain, 0, 1)`, combined with a **dark/negative-space**
+  term `u_darkLevel * smoothstep(u_darkThreshold, 0, cm)` (cell-center luma `cm`) via `max()`. So
+  the rain/wave/glitch/figure show along the on-screen shapes *and* fill the dark background,
+  carving the bright shapes out of an animated negative space, screen-blended over the live game
+  via the same composite as Fusion mode (**B** toggles the underlay off).
   Audio-reactive: the `edge_beat_current` envelope (`main.rs`) bumps `edge_gain` on beats so more
   of the animation breaks through, and bass drives the shared chroma aberration. **Zero GPU→CPU
   readback** — the game frame is already a texture in our context. With no game frame bound,

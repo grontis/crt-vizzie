@@ -12,6 +12,7 @@ mod platform;
 mod renderer;
 mod rng;
 mod sdl_gl;
+mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -238,6 +239,15 @@ fn run_window(
         unsafe { ascii.resize(&gfx.gl, iw, ih) };
     }
 
+    // Debug overlay: draggable sliders for live param tuning (Windows dev tool; U toggles it).
+    let mut ui = match unsafe { ui::DebugUi::new(&gfx.gl) } {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[ui] init FAILED: {e}");
+            std::process::exit(1);
+        }
+    };
+
     // Software-frame texture: used when the core renders on the CPU (delivers pixels via
     // video_refresh) instead of into our FBO — e.g. parallel_n64's software renderer.
     let sw_tex = unsafe {
@@ -270,9 +280,18 @@ fn run_window(
         for event in events {
             use sdl2::event::Event;
             use sdl2::keyboard::Keycode;
+            // Debug UI gets first crack at mouse events (slider drag); if it consumes one,
+            // don't process it further.
+            if ui.handle_event(&event, &mut params) {
+                continue;
+            }
             match event {
                 Event::Quit { .. }
                 | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'main,
+                Event::KeyDown { keycode: Some(Keycode::U), .. } => {
+                    ui.toggle();
+                    eprintln!("[ui] visible: {}", ui.visible);
+                }
                 Event::KeyDown { keycode: Some(Keycode::P), .. } => {
                     params.phosphor_index = (params.phosphor_index + 1) % config::PHOSPHOR_ORDER.len();
                     eprintln!("[renderer] phosphor: {}", config::PHOSPHOR_ORDER[params.phosphor_index]);
@@ -406,6 +425,7 @@ fn run_window(
             gfx.gl.clear(glow::COLOR_BUFFER_BIT);
             ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
             ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h);
+            ui.render(&gfx.gl, &params, win_w, win_h);
         }
 
         gfx.window.gl_swap_window();

@@ -91,6 +91,11 @@ pub struct Params {
     /// Per-frame beat envelope added to edge_gain (maintained in main.rs, mirrors
     /// chroma_beat_current). Default: 0.0.
     pub edge_beat_current: f32,
+    /// Cells with game luma below this become animation space ("negative space"). Default: 0.25.
+    pub edge_dark_threshold: f32,
+    /// Max intensity (0..1) of the dark/negative-space animation. The threshold picks where it
+    /// starts; this scales how strong it gets at full darkness. Default: 0.6.
+    pub edge_dark_level:     f32,
 
     // ── Bass-vibe layer (native-only) ─────────────────────────────────────────
     /// Smoothed bass level must exceed this to trigger vibe patches. Default: 0.45.
@@ -188,6 +193,8 @@ impl Default for Params {
             edge_gain:         4.0,
             edge_beat_boost:   0.5,
             edge_beat_current: 0.0,
+            edge_dark_threshold: 0.25,
+            edge_dark_level:     0.6,
 
             // Bass-vibe (native-only)
             bass_vibe_threshold:   0.45,
