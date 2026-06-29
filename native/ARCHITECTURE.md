@@ -125,16 +125,17 @@ shader.
 
 - **0 — Fusion (default).** The figure/rain/wave/glitch engine (`fusion.rs`) fills the data
   textures, composited *over* the game via screen blend (above).
-- **1 — Edge.** Contour line-art **traced from the game frame and drawn over it**: the shader
-  runs a cell-scale Sobel on `u_gameTex` (sample offsets = `1/gridSize`, so edges match the
-  glyph grid), maps the gradient direction to a stroke glyph (`| / - \`) and the magnitude to
-  brightness, then screen-blends those glyphs over the live game via the same composite as
-  Fusion mode (so you see the game *plus* its glowing outlines; **B** toggles the underlay off
-  for glyphs-on-black). Phosphor monochrome (the **P** key still recolors it), audio-reactive
-  (beats pulse brightness via the `edge_beat_current` envelope in `main.rs`; bass drives the
-  shared chroma aberration). No data textures, no `fusion.update()`, no per-cell upload — and
-  **zero GPU→CPU readback**: the game frame is already a texture in our context. With no game
-  frame bound, `u_gamePresent = 0` → no contours.
+- **1 — Edge.** The **exact same fusion animation, masked by the game's edges**. Fusion still
+  fills the data textures every frame; the shader fetches each cell's glyph/brightness/color as
+  usual, then multiplies brightness by an edge factor: a cell-scale Sobel on `u_gameTex` (sample
+  offsets = `1/gridSize`, so the mask matches the glyph grid, not per-texel noise) →
+  `clamp((mag - u_edgeThreshold) * u_edgeGain, 0, 1)`. So the rain/wave/glitch/figure only show
+  along the on-screen shapes, carving the game's contours out of the animation, screen-blended
+  over the live game via the same composite as Fusion mode (**B** toggles the underlay off).
+  Audio-reactive: the `edge_beat_current` envelope (`main.rs`) bumps `edge_gain` on beats so more
+  of the animation breaks through, and bass drives the shared chroma aberration. **Zero GPU→CPU
+  readback** — the game frame is already a texture in our context. With no game frame bound,
+  `u_gamePresent = 0` → the mask is 0 (nothing shows).
 
 ## Audio: cpal → rustfft, faithfully
 

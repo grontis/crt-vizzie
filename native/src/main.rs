@@ -345,19 +345,17 @@ fn run_window(
                 params.edge_beat_current = params.edge_beat_current * 0.85
                     + audio.beat_intensity() * params.edge_beat_boost * 0.15;
 
-                // 4. Build the audio frame and run fusion — only in Fusion mode. Edge mode
-                //    derives its glyphs in-shader from the game frame, so the fusion logic
-                //    tick (and its per-cell upload below) is skipped to save CPU on the Pi.
-                if params.viz_mode == 0 {
-                    let frame = fusion::AudioFrame {
-                        spectrum:       audio.spectrum(),
-                        bands:          audio.bands(),
-                        beat_active:    audio.beat_active(),
-                        beat_intensity: audio.beat_intensity(),
-                        live:           audio.is_live(),
-                    };
-                    fusion.update(&frame, ascii.cols(), ascii.rows(), &params);
-                }
+                // 4. Build the audio frame and run fusion. Both modes use the fusion output:
+                //    Fusion mode shows it in full; Edge mode masks it by the game's edges in
+                //    the shader (so the same animation only shows along the on-screen shapes).
+                let frame = fusion::AudioFrame {
+                    spectrum:       audio.spectrum(),
+                    bands:          audio.bands(),
+                    beat_active:    audio.beat_active(),
+                    beat_intensity: audio.beat_intensity(),
+                    live:           audio.is_live(),
+                };
+                fusion.update(&frame, ascii.cols(), ascii.rows(), &params);
 
                 logic_accum -= LOGIC_DT;
             }
@@ -406,10 +404,7 @@ fn run_window(
             gfx.gl.viewport(0, 0, win_w as i32, win_h as i32);
             gfx.gl.clear_color(0.0, 0.0, 0.0, 1.0);
             gfx.gl.clear(glow::COLOR_BUFFER_BIT);
-            // Edge mode reads no data textures, so skip the per-cell upload there.
-            if params.viz_mode == 0 {
-                ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
-            }
+            ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
             ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h);
         }
 
