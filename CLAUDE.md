@@ -214,6 +214,24 @@ Scanline modes (controlled by `V2_PARAMS.scanlineMode`, valid range 0–3):
 
 ---
 
+## Code comments & documentation conventions
+
+Keep the codebase **feature-focused**, not timeline- or session-focused. Comments should explain
+what the code does and why, as if it had always existed.
+
+- **No development-phase or milestone framing** in code or comments — no "Phase 1/2…", "M0/M1…",
+  "spike", "MVP", "deferred to Phase N", or "step 3 of the port". Describe the behavior, not the
+  order it was built in.
+- **No session-specific references** — no "FIX 1/2", "the bug where…", dates ("confirmed
+  2026-06-28"), reviewer initials, or "interim" markers. State the invariant or rationale plainly.
+- **TODOs, roadmaps, and known limitations live in docs, not inline.** Do not leave `TODO`/`FIXME`
+  markers in source; record deferred work in the relevant doc (e.g. native/ARCHITECTURE.md's
+  "Known limitations & future work"). An inline comment may *point* to that doc, but the item
+  itself belongs in the doc.
+- **Provenance references are fine** when they aid maintenance — e.g. "mirrors `sketch.js`" or
+  "verbatim from `V2_CONFIG`", since the `v2/` web app is the behavioral source of truth.
+- Match the surrounding comment density and style; don't narrate obvious code.
+
 ## Common pitfalls for agents and contributors
 
 - There is no p5.js. Do not add it. Do not reference `p`, `p5`, `sketch`, `draw()`, `setup()`.
