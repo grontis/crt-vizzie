@@ -92,6 +92,21 @@ pub struct Params {
     /// starts; this scales how strong it gets at full darkness. Default: 0.6.
     pub edge_dark_level:     f32,
 
+    // ── Full-screen glitch FX (native-only post-process) ───────────────────────
+    /// Single 0..1 "glitchiness" control (shown as a percentage in the UI). Drives the three
+    /// derived params below each tick in main.rs. Default: 0.05 (5%).
+    pub glitch_fx_master: f32,
+    /// Master displacement scale while a glitch burst is active (derived from glitch_fx_master).
+    pub glitch_fx_intensity: f32,
+    /// Per-30 Hz-tick probability of a random glitch burst. Default: 0.02.
+    pub glitch_fx_chance:    f32,
+    /// Burst envelope decay per tick (lower = shorter bursts). Default: 0.82.
+    pub glitch_fx_decay:     f32,
+    /// Runtime burst envelope, 0 = idle (maintained in main.rs). Default: 0.0.
+    pub glitch_fx_env:       f32,
+    /// Runtime random seed for the current burst's pattern (maintained in main.rs). Default: 0.0.
+    pub glitch_fx_seed:      f32,
+
     // ── Bass-vibe layer (native-only) ─────────────────────────────────────────
     /// Smoothed bass level must exceed this to trigger vibe patches. Default: 0.45.
     pub bass_vibe_threshold:   f32,
@@ -187,6 +202,14 @@ impl Default for Params {
             edge_beat_current: 0.0,
             edge_dark_threshold: 0.25,
             edge_dark_level:     0.6,
+
+            // Full-screen glitch FX (intensity/chance/decay are derived from the master each tick)
+            glitch_fx_master:    0.05,
+            glitch_fx_intensity: 0.15,
+            glitch_fx_chance:    0.01,
+            glitch_fx_decay:     0.524,
+            glitch_fx_env:       0.0,
+            glitch_fx_seed:      0.0,
 
             // Bass-vibe (native-only)
             bass_vibe_threshold:   0.45,

@@ -9,6 +9,7 @@ mod fusion;
 mod hw_input;
 mod libretro;
 mod platform;
+mod post;
 mod renderer;
 mod rng;
 mod sdl_gl;
@@ -247,6 +248,23 @@ fn run_window(
         }
     };
 
+    // Full-screen glitch/warp post-process. The scene renders into its offscreen FBO; the post
+    // pass distorts it to the screen.
+    let post = match unsafe { post::PostFx::new(&gfx.gl) } {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[post] init FAILED: {e}");
+            std::process::exit(1);
+        }
+    };
+    {
+        let (iw, ih) = gfx.window.size();
+        unsafe { post.resize(&gfx.gl, iw, ih) };
+    }
+    // RNG + wall clock driving the momentary glitch bursts.
+    let mut glitch_rng = rng::Xorshift32::new(0x51A5_F00D);
+    let start_time = std::time::Instant::now();
+
     // Software-frame texture: used when the core renders on the CPU (delivers pixels via
     // video_refresh) instead of into our FBO — e.g. parallel_n64's software renderer.
     let sw_tex = unsafe {
@@ -320,6 +338,7 @@ fn run_window(
                 }
                 Event::Window { win_event: sdl2::event::WindowEvent::Resized(w, h), .. } => {
                     unsafe { ascii.resize(&gfx.gl, w as u32, h as u32) };
+                    unsafe { post.resize(&gfx.gl, w as u32, h as u32) };
                     fusion.reset(ascii.cols(), ascii.rows());
                     eprintln!("[renderer] resize {}x{} → grid {}x{}",
                         w, h, ascii.cols(), ascii.rows());
@@ -357,6 +376,21 @@ fn run_window(
                 //     envelope above so more of the animation breaks through on the beat).
                 params.edge_beat_current = params.edge_beat_current * 0.85
                     + audio.beat_intensity() * params.edge_beat_boost * 0.15;
+
+                // 3c. Full-screen glitch FX. The UI exposes a single 0..1 "glitchiness" master;
+                //     derive the three working params from it (each mapped across its useful range).
+                let m = params.glitch_fx_master.clamp(0.0, 1.0);
+                params.glitch_fx_intensity = m * 3.0;
+                params.glitch_fx_chance    = m * 0.2;
+                params.glitch_fx_decay     = 0.5 + m * 0.45;
+                //     Decay the burst envelope, then maybe kick off a new momentary burst —
+                //     random chance, more likely on a strong beat — with a fresh random seed.
+                params.glitch_fx_env *= params.glitch_fx_decay;
+                let beat_kick = if audio.beat_active() { audio.beat_intensity() * 0.08 } else { 0.0 };
+                if glitch_rng.rand() < params.glitch_fx_chance + beat_kick {
+                    params.glitch_fx_env = 0.6 + glitch_rng.rand() * 0.4;
+                    params.glitch_fx_seed = glitch_rng.rand() * 1000.0;
+                }
 
                 // 4. Build the audio frame and run fusion. The shader masks this animation by the
                 //    game's edges + dark space (so it shows along the on-screen shapes).
@@ -412,12 +446,13 @@ fn run_window(
         };
 
         unsafe {
-            gfx.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            gfx.gl.viewport(0, 0, win_w as i32, win_h as i32);
-            gfx.gl.clear_color(0.0, 0.0, 0.0, 1.0);
-            gfx.gl.clear(glow::COLOR_BUFFER_BIT);
+            // Pass 1: render the scene (game + ASCII animation) into the offscreen FBO.
+            post.bind_scene(&gfx.gl, win_w, win_h);
             ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
             ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h);
+            // Pass 2: full-screen glitch/warp post-process → default framebuffer.
+            post.render(&gfx.gl, &params, start_time.elapsed().as_secs_f32(), win_w, win_h);
+            // UI overlay on top (drawn after the glitch so it stays readable).
             ui.render(&gfx.gl, &params, win_w, win_h);
         }
 

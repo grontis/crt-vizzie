@@ -52,9 +52,11 @@ is the only consumer of game-frame luma) is off by default and deferred.
 | `libretro.rs` | `libloading` + `rust-libretro-sys`; env callback; `SET_HW_RENDER`; owns the game-frame FBO; **discards audio** | new |
 | `audio.rs` | `cpal` capture from the USB device → ring → `rustfft` → spectrum/bands/beat | analysis half of `audio.js` |
 | `fusion.rs` | figure/rain/wave/glitch; fills `char_idx`/`bright16`/`cga_idx` | `fusion.js` (verbatim) |
-| `renderer.rs` | `glow`: atlas tex, RG16UI + R8 data textures, composite shader, 1 draw | `renderer.js` |
-| `bridge.rs` | tokio-tungstenite **client** → `ws://localhost:9001`; clamp+write params; send audio @16Hz | `hardware-bridge.js` |
-| `config.rs` | consts + `Params` struct + `RANGES` | `config.js` |
+| `renderer.rs` | `glow`: atlas tex, RG16UI + R8 data textures, edge-masked composite shader, 1 draw | `renderer.js` |
+| `post.rs` | offscreen scene FBO + full-screen glitch/warp post-process pass | new |
+| `ui.rs` | debug slider overlay for live param tuning (dev tool) | `bg-fx-panel.js` |
+| `hw_input.rs` | MCP3008 SPI knobs + GPIO buttons/LEDs (Pi); no-op stub elsewhere | `hardware-bridge.js` |
+| `config.rs` | consts + `Params` struct | `config.js` |
 | `ascii_art.rs` | static figure data | `ascii-art.js` |
 
 ---
@@ -137,6 +139,20 @@ readback** — the game frame is already a texture in our context. With no game 
 
 (An earlier build had a second "full fusion" mode toggled by **G**; that toggle was removed once
 this became the single mode. The fusion engine itself stays — it is what the mask reveals.)
+
+## Full-screen glitch FX (post-process)
+
+A second pass (`post.rs`) distorts the whole composited view. The renderer draws the scene
+(game + ASCII) into an offscreen FBO instead of the screen; `PostFx::render` then samples that
+texture full-screen and applies momentary, destructive distortion — horizontal slice tears, block
+jitter, sinusoidal warp, RGB channel split, and noise flicker. The debug slider overlay (`ui.rs`)
+is drawn *after* this pass so it stays readable.
+
+The effect is driven by a **burst envelope** (`glitch_fx_env`) maintained in `main.rs`: it decays
+each 30 Hz tick and is randomly kicked to a high value (more likely on a strong beat), with a fresh
+random `glitch_fx_seed` per burst. At `env == 0` the pass is a 1:1 passthrough. Tunables:
+`glitch_fx_intensity` (displacement scale), `glitch_fx_chance` (burst frequency), `glitch_fx_decay`
+(burst length).
 
 ## Audio: cpal → rustfft, faithfully
 

@@ -67,6 +67,7 @@ enum SliderId {
     EdgeBeatBoost,
     EdgeDarkThreshold,
     EdgeDarkLevel,
+    GlitchFx,
 }
 
 struct SliderDef {
@@ -74,14 +75,17 @@ struct SliderDef {
     label: &'static str,
     min: f32,
     max: f32,
+    /// Show the value as a 0–100% percentage instead of the raw float.
+    percent: bool,
 }
 
 const SLIDERS: &[SliderDef] = &[
-    SliderDef { id: SliderId::EdgeThreshold,     label: "edge_threshold",     min: 0.0, max: 0.5 },
-    SliderDef { id: SliderId::EdgeGain,          label: "edge_gain",          min: 0.0, max: 16.0 },
-    SliderDef { id: SliderId::EdgeBeatBoost,     label: "edge_beat_boost",    min: 0.0, max: 4.0 },
-    SliderDef { id: SliderId::EdgeDarkThreshold, label: "edge_dark_threshold", min: 0.0, max: 1.0 },
-    SliderDef { id: SliderId::EdgeDarkLevel,     label: "edge_dark_level",     min: 0.0, max: 1.0 },
+    SliderDef { id: SliderId::EdgeThreshold,     label: "edge_threshold",     min: 0.0, max: 0.5,  percent: false },
+    SliderDef { id: SliderId::EdgeGain,          label: "edge_gain",          min: 0.0, max: 16.0, percent: false },
+    SliderDef { id: SliderId::EdgeBeatBoost,     label: "edge_beat_boost",    min: 0.0, max: 4.0,  percent: false },
+    SliderDef { id: SliderId::EdgeDarkThreshold, label: "edge_dark_threshold", min: 0.0, max: 1.0, percent: false },
+    SliderDef { id: SliderId::EdgeDarkLevel,     label: "edge_dark_level",     min: 0.0, max: 1.0, percent: false },
+    SliderDef { id: SliderId::GlitchFx,          label: "glitch_fx",          min: 0.0, max: 1.0,  percent: true  },
 ];
 
 // ── Panel layout (pixels) ───────────────────────────────────────────────────────
@@ -103,6 +107,7 @@ fn get_param(params: &crate::config::Params, id: SliderId) -> f32 {
         SliderId::EdgeBeatBoost => params.edge_beat_boost,
         SliderId::EdgeDarkThreshold => params.edge_dark_threshold,
         SliderId::EdgeDarkLevel => params.edge_dark_level,
+        SliderId::GlitchFx => params.glitch_fx_master,
     }
 }
 
@@ -113,6 +118,7 @@ fn set_param(params: &mut crate::config::Params, id: SliderId, v: f32) {
         SliderId::EdgeBeatBoost => params.edge_beat_boost = v,
         SliderId::EdgeDarkThreshold => params.edge_dark_threshold = v,
         SliderId::EdgeDarkLevel => params.edge_dark_level = v,
+        SliderId::GlitchFx => params.glitch_fx_master = v,
     }
 }
 
@@ -261,7 +267,11 @@ impl DebugUi {
         for (i, s) in SLIDERS.iter().enumerate() {
             let label_y = PANEL_Y + PAD + i as f32 * ROW_H;
             let val = get_param(params, s.id);
-            let line = format!("{}: {:.3}", s.label, val);
+            let line = if s.percent {
+                format!("{}: {:.0}%", s.label, val * 100.0)
+            } else {
+                format!("{}: {:.3}", s.label, val)
+            };
             self.push_text(&line, PANEL_X + PAD, label_y, scale, text_color);
         }
         let text_count = self.verts.len() / 8 - solid_count;
