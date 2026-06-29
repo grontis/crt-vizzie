@@ -26,7 +26,7 @@ struct AtlasMetrics {
     atlas_rows: i32,
     atlas_tex_w: f32,
     atlas_tex_h: f32,
-    charset: Vec<String>, // Phase 2 (fusion char→index map): exposed via AsciiRenderer::charset().
+    charset: Vec<String>, // fusion char→index map: exposed via AsciiRenderer::charset().
 }
 
 #[cfg(windows)]
@@ -72,9 +72,7 @@ uniform float u_gameFlip;
 uniform float u_bgEnabled;
 uniform float u_bgOpacity;
 
-// Edge mode (viz_mode == 1): the existing fusion animation, masked by the game's edges
-// AND its dark/negative space.
-uniform int   u_mode;            // 0 = fusion (full), 1 = edge-masked fusion
+// The fusion animation, masked by the game's edges AND its dark/negative space.
 uniform float u_edgeThreshold;   // min Sobel magnitude before a cell shows through
 uniform float u_edgeGain;        // magnitude to mask scale (incl. beat boost)
 uniform float u_darkThreshold;   // cells darker than this become animation space
@@ -122,39 +120,37 @@ void main() {
     return;
   }
 
-  // The glyph, brightness and color always come from the fusion engine — identical
-  // animation in both modes.
+  // The glyph, brightness and color come from the fusion engine; we then gate that
+  // animation by the game's edge structure + dark/negative space so the characters only
+  // show along the on-screen shapes and fill the dark background.
   uvec4 data = texelFetch(u_cellData, cellPos, 0);
   int   charIdx = int(data.r);
   float bright  = float(data.g) / 65535.0;
   int   cgaIdx  = int(texelFetch(u_cellColor, cellPos, 0).r * 255.0 + 0.5);
 
-  if (u_mode == 1) {
-    // Edge-masked mode: gate that same animation by the game's edge structure, so the
-    // characters only show along the shapes on screen. Cell-scale Sobel (offsets span
-    // one cell in game-UV space, so the mask matches the glyph grid, not per-texel noise).
-    vec2 g   = vec2(u_gridSize);
-    vec2 cuv = (vec2(cellPos) + 0.5) / g;
-    vec2 o   = 1.0 / g;
-    float tl = gameLuma(cuv + vec2(-o.x, -o.y));
-    float tm = gameLuma(cuv + vec2( 0.0, -o.y));
-    float tr = gameLuma(cuv + vec2( o.x, -o.y));
-    float ml = gameLuma(cuv + vec2(-o.x,  0.0));
-    float mr = gameLuma(cuv + vec2( o.x,  0.0));
-    float bl = gameLuma(cuv + vec2(-o.x,  o.y));
-    float bm = gameLuma(cuv + vec2( 0.0,  o.y));
-    float br = gameLuma(cuv + vec2( o.x,  o.y));
-    float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
-    float gy = (bl + 2.0 * bm + br) - (tl + 2.0 * tm + tr);
-    float mag  = length(vec2(gx, gy));
-    float edge = clamp((mag - u_edgeThreshold) * u_edgeGain, 0.0, 1.0);
-    // Dark/negative space is also animation space: the darker the cell, the more the
-    // animation fills it. Use the cell-center luma (cm), not the gradient. smoothstep gives a
-    // gentle ramp from the threshold down to black; u_darkLevel caps the strength.
-    float cm   = gameLuma(cuv);
-    float dark = u_darkLevel * smoothstep(u_darkThreshold, 0.0, cm);
-    bright *= max(edge, dark) * u_gamePresent;
-  }
+  // Cell-scale Sobel (offsets span one cell in game-UV space, so the mask matches the
+  // glyph grid, not per-texel noise).
+  vec2 g   = vec2(u_gridSize);
+  vec2 cuv = (vec2(cellPos) + 0.5) / g;
+  vec2 o   = 1.0 / g;
+  float tl = gameLuma(cuv + vec2(-o.x, -o.y));
+  float tm = gameLuma(cuv + vec2( 0.0, -o.y));
+  float tr = gameLuma(cuv + vec2( o.x, -o.y));
+  float ml = gameLuma(cuv + vec2(-o.x,  0.0));
+  float mr = gameLuma(cuv + vec2( o.x,  0.0));
+  float bl = gameLuma(cuv + vec2(-o.x,  o.y));
+  float bm = gameLuma(cuv + vec2( 0.0,  o.y));
+  float br = gameLuma(cuv + vec2( o.x,  o.y));
+  float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+  float gy = (bl + 2.0 * bm + br) - (tl + 2.0 * tm + tr);
+  float mag  = length(vec2(gx, gy));
+  float edge = clamp((mag - u_edgeThreshold) * u_edgeGain, 0.0, 1.0);
+  // Dark/negative space is also animation space: the darker the cell, the more the
+  // animation fills it. Use the cell-center luma (cm), not the gradient. smoothstep gives a
+  // gentle ramp from the threshold down to black; u_darkLevel caps the strength.
+  float cm   = gameLuma(cuv);
+  float dark = u_darkLevel * smoothstep(u_darkThreshold, 0.0, cm);
+  bright *= max(edge, dark) * u_gamePresent;
 
   vec2 fragInCell = fragCoord - vec2(cellPos) * u_cellSize;
 
@@ -253,8 +249,7 @@ impl AsciiRenderer {
             "u_atlasTileSize", "u_atlasDims", "u_atlasTexSize", "u_phosphorDim", "u_phosphorMid",
             "u_phosphorBright", "u_chromaOffset", "u_scanline", "u_scanlineMode", "u_cgaColors",
             "u_gameTex", "u_gameUvScale", "u_gameFlip", "u_bgEnabled", "u_bgOpacity",
-            "u_mode", "u_edgeThreshold", "u_edgeGain", "u_darkThreshold", "u_darkLevel",
-            "u_gamePresent",
+            "u_edgeThreshold", "u_edgeGain", "u_darkThreshold", "u_darkLevel", "u_gamePresent",
         ];
         let mut uniforms = HashMap::new();
         for n in names {
@@ -388,9 +383,7 @@ impl AsciiRenderer {
         gl.uniform_1_f32(self.u("u_bgEnabled"), bg_enabled);
         gl.uniform_1_f32(self.u("u_bgOpacity"), params.bg_opacity);
 
-        // Edge-masked mode (viz_mode == 1): the shader gates fusion's brightness by the game's
-        // edges and its dark/negative space.
-        gl.uniform_1_i32(self.u("u_mode"), params.viz_mode as i32);
+        // The shader gates fusion's brightness by the game's edges and its dark/negative space.
         gl.uniform_1_f32(self.u("u_edgeThreshold"), params.edge_threshold);
         gl.uniform_1_f32(self.u("u_edgeGain"), params.edge_gain + params.edge_beat_current);
         gl.uniform_1_f32(self.u("u_darkThreshold"), params.edge_dark_threshold);

@@ -32,10 +32,10 @@ pub fn check_angle() {
         .collect();
     if !missing.is_empty() {
         eprintln!(
-            "[spike] WARNING: ANGLE DLL(s) not found next to the exe: {}",
+            "[crt] WARNING: ANGLE DLL(s) not found next to the exe: {}",
             missing.join(", ")
         );
-        eprintln!("[spike]   GLES3 context creation will likely fail — see native/WINDOWS_DEV.md");
+        eprintln!("[crt]   GLES3 context creation will likely fail — see native/WINDOWS_DEV.md");
     }
 }
 

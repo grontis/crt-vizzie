@@ -49,8 +49,6 @@ pub struct retro_game_info {
 }
 
 // ─── Callback typedefs (frontend registers these with the core) ───────────────
-// M0/M1 don't install any of these; they're declared so M2+ can wire them without
-// re-deriving the signatures.
 
 pub type RetroEnvironmentT = unsafe extern "C" fn(c_uint, *mut c_void) -> bool;
 pub type RetroVideoRefreshT = unsafe extern "C" fn(*const c_void, c_uint, c_uint, usize);
@@ -131,7 +129,7 @@ type FnLoadGame = unsafe extern "C" fn(*const retro_game_info) -> bool;
 
 /// A loaded libretro core with its entry points resolved.
 ///
-/// All `retro_*` symbols are resolved up front so later milestones can drive the core
+/// All `retro_*` symbols are resolved up front so the rest of the code can drive the core
 /// without re-touching the dynamic loader.
 pub struct Core {
     pub api_version: FnApiVersion,
@@ -199,8 +197,8 @@ impl Core {
         Ok(core)
     }
 
-    /// M1 deliverable: print the core's static identity (name, version, extensions,
-    /// and `need_fullpath` — which decides whether M3 passes the ROM path or its bytes).
+    /// Print the core's static identity (name, version, extensions, and `need_fullpath` —
+    /// which decides whether load_game passes the ROM path or its bytes).
     pub fn print_system_info(&self) {
         // SAFETY: zeroed is a valid initial state — pointer fields become null (we null-check
         // below) and bool fields become false.
@@ -216,13 +214,13 @@ impl Core {
         };
 
         println!(
-            "[spike] core: {} {}",
+            "[crt] core: {} {}",
             s(info.library_name),
             s(info.library_version)
         );
-        println!("[spike]   valid_extensions: {}", s(info.valid_extensions));
+        println!("[crt]   valid_extensions: {}", s(info.valid_extensions));
         println!(
-            "[spike]   need_fullpath: {}   block_extract: {}",
+            "[crt]   need_fullpath: {}   block_extract: {}",
             info.need_fullpath, info.block_extract
         );
     }

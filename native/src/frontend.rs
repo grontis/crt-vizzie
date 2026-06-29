@@ -6,15 +6,15 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::libretro::*;
 
-// FBO the core renders into (set at M3). 0 until then.
+// FBO the core renders into (set once the hw-render context is established). 0 until then.
 static FBO: AtomicU32 = AtomicU32::new(0);
-// Valid frame region reported by video_refresh (set from M4). 0 until then.
+// Valid frame region reported by video_refresh. 0 until the first frame.
 static CUR_W: AtomicU32 = AtomicU32::new(0);
 static CUR_H: AtomicU32 = AtomicU32::new(0);
-// Core's GL (re)init / teardown hooks captured from SET_HW_RENDER; called at M3. fn-ptr as usize.
+// Core's GL (re)init / teardown hooks captured from SET_HW_RENDER. fn-ptr as usize.
 static CONTEXT_RESET: AtomicUsize = AtomicUsize::new(0);
 static CONTEXT_DESTROY: AtomicUsize = AtomicUsize::new(0);
-// What the core asked for at SET_HW_RENDER (M3 diagnostic): context type + accept/reject.
+// What the core asked for at SET_HW_RENDER (diagnostic): context type + accept/reject.
 static HW_CONTEXT_TYPE: AtomicU32 = AtomicU32::new(0);
 static HW_ACCEPTED: AtomicBool = AtomicBool::new(false);
 
@@ -38,7 +38,7 @@ struct SwFrame {
 static SW_FRAME: Mutex<SwFrame> = Mutex::new(SwFrame { w: 0, h: 0, data: Vec::new() });
 
 fn sys_dir_ptr() -> *const c_char {
-    // The core may read/write system + save files here; "." (cwd) is fine for the spike.
+    // The core may read/write system + save files here; "." (cwd) is fine.
     SYS_DIR.get_or_init(|| CString::new(".").unwrap()).as_ptr()
 }
 
@@ -46,7 +46,7 @@ fn sys_dir_ptr() -> *const c_char {
 ///
 /// # Safety
 /// `core` must be a loaded libretro core; a current GL context should already exist (the core
-/// may request a hardware-render context to share at M3, via the env callback).
+/// may request a hardware-render context to share, via the env callback).
 pub unsafe fn init_core(core: &Core) {
     (core.set_environment)(env_callback);
     (core.set_video_refresh)(video_refresh);
@@ -57,7 +57,7 @@ pub unsafe fn init_core(core: &Core) {
     (core.init)();
 }
 
-/// M3a: load a ROM (need_fullpath=false → pass the bytes). The core calls SET_HW_RENDER from
+/// Load a ROM (need_fullpath=false → pass the bytes). The core calls SET_HW_RENDER from
 /// inside this, so afterwards `hw_context_type()` / `hw_accepted()` report what it asked for.
 ///
 /// # Safety
@@ -102,13 +102,13 @@ pub fn context_type_name(t: u32) -> &'static str {
     }
 }
 
-/// M3b: publish the raw GL name of the FBO the core renders into (get_current_framebuffer
+/// Publish the raw GL name of the FBO the core renders into (get_current_framebuffer
 /// returns this each frame).
 pub fn set_fbo(name: u32) {
     FBO.store(name, Ordering::Release);
 }
 
-/// M4: the valid frame region the core last reported via video_refresh (0 until the first run).
+/// The valid frame region the core last reported via video_refresh (0 until the first run).
 pub fn cur_w() -> u32 {
     CUR_W.load(Ordering::Acquire)
 }
@@ -131,7 +131,7 @@ pub fn with_sw_frame<R>(f: impl FnOnce(u32, u32, &[u8]) -> R) -> Option<R> {
     }
 }
 
-/// M3b: invoke the core's captured context_reset so it (re)initializes its GL resources.
+/// Invoke the core's captured context_reset so it (re)initializes its GL resources.
 ///
 /// # Safety
 /// A current GL context and a valid published FBO (`set_fbo`) must already be in place.
@@ -158,7 +158,7 @@ unsafe extern "C" fn env_callback(cmd: c_uint, data: *mut c_void) -> bool {
             if !data.is_null() {
                 let fmt = *(data as *const c_uint);
                 PIXEL_FORMAT.store(fmt, Ordering::Release);
-                eprintln!("[spike] SET_PIXEL_FORMAT: {fmt} (0=0RGB1555, 1=XRGB8888, 2=RGB565)");
+                eprintln!("[crt] SET_PIXEL_FORMAT: {fmt} (0=0RGB1555, 1=XRGB8888, 2=RGB565)");
             }
             true
         }
@@ -200,7 +200,7 @@ unsafe extern "C" fn env_callback(cmd: c_uint, data: *mut c_void) -> bool {
 }
 
 /// Capture the core's hw-render request and install our GL hooks.
-/// Not exercised until M3 (the core calls SET_HW_RENDER from inside retro_load_game).
+/// The core calls SET_HW_RENDER from inside retro_load_game.
 unsafe fn set_hw_render(data: *mut c_void) -> bool {
     if data.is_null() {
         return false;
@@ -209,7 +209,7 @@ unsafe fn set_hw_render(data: *mut c_void) -> bool {
     HW_CONTEXT_TYPE.store(hw.context_type, Ordering::Release);
 
     // We can only share a GL/GLES context. Reject anything else (notably VULKAN) loudly so the
-    // M3 failure mode is an obvious log line, not a silent black screen.
+    // failure mode is an obvious log line, not a silent black screen.
     let ok = matches!(
         hw.context_type,
         RETRO_HW_CONTEXT_OPENGLES3
@@ -220,7 +220,7 @@ unsafe fn set_hw_render(data: *mut c_void) -> bool {
     if !ok {
         HW_ACCEPTED.store(false, Ordering::Release);
         eprintln!(
-            "[spike] core requested unsupported hw context_type={} (need GL/GLES). \
+            "[crt] core requested unsupported hw context_type={} (need GL/GLES). \
              Likely the Vulkan/ParaLLEl RDP default — force GLideN64 via a core option.",
             hw.context_type
         );
@@ -234,7 +234,7 @@ unsafe fn set_hw_render(data: *mut c_void) -> bool {
     HW_ACCEPTED.store(true, Ordering::Release);
 
     eprintln!(
-        "[spike] SET_HW_RENDER accepted: context_type={} depth={} stencil={} bottom_left_origin={} v{}.{}",
+        "[crt] SET_HW_RENDER accepted: context_type={} depth={} stencil={} bottom_left_origin={} v{}.{}",
         hw.context_type, hw.depth, hw.stencil, hw.bottom_left_origin, hw.version_major, hw.version_minor
     );
     true
@@ -247,8 +247,8 @@ unsafe extern "C" fn get_current_framebuffer() -> usize {
 }
 
 unsafe extern "C" fn get_proc_address(sym: *const c_char) -> RetroProcAddressT {
-    // Resolve the core's GL entry points through SDL so it shares OUR context (ANGLE on Windows,
-    // native GLES3 on the Pi). Requires a current GL context, which exists by M3.
+    // Resolve the core's GL entry points through SDL so it shares OUR context (desktop GL on
+    // Windows, native GLES3 on the Pi). Requires a current GL context, which exists by this point.
     let p = sdl2::sys::SDL_GL_GetProcAddress(sym);
     // Pointer-sized -> fn-pointer Option; a null SDL result becomes None via the fn-ptr niche.
     std::mem::transmute(p)

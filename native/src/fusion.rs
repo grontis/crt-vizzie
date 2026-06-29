@@ -551,10 +551,10 @@ impl Fusion {
         self.cga_idx[..n].fill(0);
 
         // =====================================================================
-        // STATE UPDATE PHASES
+        // STATE UPDATE
         // =====================================================================
 
-        // ── Phase 1: Figure layer state ───────────────────────────────────────
+        // ── Figure layer state ───────────────────────────────────────
         if params.fig_enabled {
             // Calm-idle: when resting, hold the current figure static (no reseed, no decay/smear).
             // The figure is the coherent centerpiece — it should persist frozen at idle.
@@ -602,7 +602,7 @@ impl Fusion {
             }
         }
 
-        // ── Phase 2: Rain layer state ─────────────────────────────────────────
+        // ── Rain layer state ─────────────────────────────────────────
         if params.rain_enabled {
             // Beat multiplier
             if audio.beat_active {
@@ -647,7 +647,7 @@ impl Fusion {
             }
         }
 
-        // ── Phase 2b: Wave layer state ────────────────────────────────────────
+        // ── Wave layer state ────────────────────────────────────────
         if params.wave_enabled {
             if beat_rising_edge {
                 self.wave_beat_boost   = (self.wave_beat_boost
@@ -662,7 +662,7 @@ impl Fusion {
             self.wave_thresh_boost = (self.wave_thresh_boost - params.wave_beat_decay * 0.7).max(0.0);
         }
 
-        // ── Phase 3: Glitch layer state ───────────────────────────────────────
+        // ── Glitch layer state ───────────────────────────────────────
         if params.glitch_enabled {
             let beat_phase = if self.last_beat_ms > 0.0 && self.beat_interval > 0.0 {
                 ((self.now_ms - self.last_beat_ms) / self.beat_interval).min(1.0)
@@ -876,10 +876,10 @@ impl Fusion {
         }
 
         // =====================================================================
-        // RENDER PHASES — bgAscii (skipped) → figure → wave → rain → glitch
+        // RENDER — figure → wave → rain → glitch
         // =====================================================================
 
-        // ── Phase 4b: Figure render ───────────────────────────────────────────
+        // ── Figure render ───────────────────────────────────────────
         if params.fig_enabled {
             let fig_op = params.fig_opacity;
             for idx in 0..n {
@@ -894,7 +894,7 @@ impl Fusion {
             }
         }
 
-        // ── Phase 4c: Wave render ─────────────────────────────────────────────
+        // ── Wave render ─────────────────────────────────────────────
         if params.wave_enabled {
             let t         = self.wave_time;
             let threshold = (params.wave_threshold - self.wave_thresh_boost).max(0.1);
@@ -947,7 +947,7 @@ impl Fusion {
             }
         }
 
-        // ── Phase 4d: Rain render ─────────────────────────────────────────────
+        // ── Rain render ─────────────────────────────────────────────
         if params.rain_enabled {
             let rain_op  = params.rain_opacity;
             let spec_len = audio.spectrum.len();
@@ -994,7 +994,7 @@ impl Fusion {
             }
         }
 
-        // ── Phase 4e: Glitch render (top layer) ───────────────────────────────
+        // ── Glitch render (top layer) ───────────────────────────────
         if params.glitch_enabled {
             let use_cga = params.glitch_cga_enabled;
             for idx in 0..n {
@@ -1010,7 +1010,7 @@ impl Fusion {
             }
         }
 
-        // ── Phase 4f: Bass-vibe patches (final layer — overwrites everything) ─
+        // ── Bass-vibe patches (final layer — overwrites everything) ─
         // Each active patch fills its rect with block glyphs re-randomized every
         // tick to create a buzzing/vibration effect.  Renders last so patches
         // dominate any underlying layer while they are alive.
@@ -1084,7 +1084,7 @@ mod tests {
     /// Verifies that div_euclid(2) matches JS Math.floor for negative odd numerators.
     /// The real grid is ~35×19 — smaller than MORPH (40×20) — so (rows - MORPH_HEIGHT)
     /// and (cols - MORPH_WIDTH) are negative. Rust `/` truncates toward zero; JS
-    /// Math.floor floors toward −∞. div_euclid replicates floor, which FIX 3 requires.
+    /// Math.floor floors toward −∞. div_euclid replicates floor, which JS parity requires.
     #[test]
     fn centering_div_euclid_matches_js_floor() {
         use crate::config::{MORPH_HEIGHT, MORPH_WIDTH};

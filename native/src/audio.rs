@@ -156,7 +156,7 @@ impl CpalAudioSource {
     /// Try to open cpal's system default audio input.
     ///
     /// Uses `host.default_input_device()` only — no device enumeration, no CLI flag.
-    /// Device selection for ALSA / Pi is deferred to Phase 5.
+    /// Selecting a specific input device by name is future work (see ARCHITECTURE.md).
     ///
     /// Returns `Err(String)` if no default device is available or the stream fails to open.
     pub fn try_new() -> Result<Self, String> {
@@ -393,7 +393,7 @@ fn build_input_stream(
     let stream_cfg: cpal::StreamConfig = config.clone().into();
     let ch = channels.max(1);
     // Runs on the realtime audio thread — must not block. eprintln! takes the stderr
-    // lock and can stall, so swallow here; proper error surfacing is deferred to Phase 5.
+    // lock and can stall, so swallow here (surfacing stream errors is future work).
     let err_fn = |_err: cpal::StreamError| {};
 
     let stream = match config.sample_format() {

@@ -35,7 +35,7 @@ impl Gfx {
             gl_attr.set_context_version(3, 0);
         }
         // The default framebuffer needs no depth/stencil — the core renders into the
-        // frontend-owned FBO (M3), which carries its own depth attachment.
+        // frontend-owned FBO, which carries its own depth attachment.
         gl_attr.set_depth_size(0);
 
         let window = video

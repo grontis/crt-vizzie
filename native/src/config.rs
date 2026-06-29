@@ -1,9 +1,4 @@
 pub struct Params {
-    // ── Visualization mode (native-only) ──────────────────────────────────────
-    /// 0 = Fusion (figure/rain/wave/glitch over the game); 1 = Edge (contour line-art
-    /// derived from the game frame). Toggled by the G key. Range 0..VIZ_MODE_COUNT.
-    pub viz_mode: u8,
-
     pub phosphor_index: usize,      // 0–4, indexes PHOSPHOR_ORDER / PHOSPHORS
     pub scanline_intensity: f32,    // 0.0–1.0
     pub scanline_mode: i32,         // 0=off 1=pixel 2=cell-gap 3=smooth
@@ -81,7 +76,7 @@ pub struct Params {
     /// before use; adjust via hardware-bridge debug builds or future config file.
     pub hw_knob_alpha: f32,
 
-    // ── Edge mode (native-only; viz_mode == 1) ────────────────────────────────
+    // ── Edge-contour mode (native-only) ───────────────────────────────────────
     /// Minimum Sobel gradient magnitude before a cell lights up. Default: 0.08.
     pub edge_threshold:    f32,
     /// Gradient magnitude → cell brightness scale. Default: 4.0.
@@ -117,10 +112,7 @@ pub struct Params {
 impl Default for Params {
     fn default() -> Self {
         Self {
-            // Visualization mode (native-only)
-            viz_mode: 0,                 // Fusion (existing animation) by default
-
-            // Renderer (Phase 1)
+            // Renderer
             phosphor_index: 2,           // green (PHOSPHOR_ORDER[2])
             scanline_intensity: 0.33,
             scanline_mode: 1,            // PIXEL
@@ -207,10 +199,6 @@ impl Default for Params {
         }
     }
 }
-
-/// Number of visualization modes (wraps `Params::viz_mode` on the G-key toggle):
-/// 0 = Fusion, 1 = Edge.
-pub const VIZ_MODE_COUNT: u8 = 2;
 
 pub const PHOSPHOR_ORDER: [&str; 5] = ["red", "amber", "green", "blue", "white"];
 

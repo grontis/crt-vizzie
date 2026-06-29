@@ -1,6 +1,6 @@
-//! Phase 4 — Hardware Input: MCP3008 SPI ADC knobs + GPIO pushbuttons + GPIO LED bank.
+//! Hardware Input: MCP3008 SPI ADC knobs + GPIO pushbuttons + GPIO LED bank.
 //!
-//! Architecture mirrors Phase 3 `AudioSource` pattern:
+//! Architecture mirrors the `AudioSource` pattern:
 //!   - `pub trait HardwareInput` — uniform interface polled once per 30 Hz tick
 //!   - `DevHardwareInput` — no-op stub (all platforms, zero new dependencies)
 //!   - `GpioHardwareInput` — `#[cfg(target_os = "linux")]` only (rppal >= 0.19 required
@@ -23,9 +23,9 @@ use crate::config::{Params, PHOSPHOR_ORDER};
 /// Mirrors bridge.py `DEAD_ZONE = 0.005`.
 const DEAD_ZONE: f32 = 0.005;
 
-/// LED on/off threshold for Phase 4 (threshold-based, not PWM).
+/// LED on/off threshold (threshold-based, not PWM).
 /// Band level > LED_THRESHOLD → pin high; else pin low.
-/// Software-PWM dimming is explicitly deferred to Phase 5.
+/// Software-PWM dimming is future work (see ARCHITECTURE.md).
 const LED_THRESHOLD: f32 = 0.5;
 
 /// Software debounce window in milliseconds. Mirrors bridge.py `bounce_time=0.05`.
@@ -44,7 +44,7 @@ pub(crate) enum ParamWrite {
     /// Scale raw ADC [0, 1] → truncated index in 0..PHOSPHOR_ORDER.len().
     /// Discrete cycling via a continuous knob (bridge.py phosphorIndex mapping).
     PhosphorIndex,
-    /// Physical channel exists but has no native `Params` equivalent in Phase 4.
+    /// Physical channel exists but has no native `Params` equivalent yet.
     /// Reactivate when bgFxHueShift (ch 2) or bgAsciiLevel (ch 5) land natively.
     Unmapped,
 }
@@ -61,7 +61,7 @@ pub(crate) struct KnobEntry {
 ///
 /// ch 0 intentionally drives three params from one pot (bridge.py comment:
 /// "shadowed, reassign once more pots are wired"). ch 2 and ch 5 have physical
-/// hardware channels but no native `Params` fields in Phase 4 (Unmapped).
+/// hardware channels but no native `Params` fields yet (Unmapped).
 static KNOBS: &[KnobEntry] = &[
     // chip 0, ch 0 — single pot simultaneously drives three rain params
     KnobEntry { chip: 0, ch: 0, write: ParamWrite::Float { field: |p| &mut p.rain_opacity,   min: 0.0,   max: 1.0  } },
@@ -69,13 +69,13 @@ static KNOBS: &[KnobEntry] = &[
     KnobEntry { chip: 0, ch: 0, write: ParamWrite::Float { field: |p| &mut p.rain_speed_min,  min: 0.01,  max: 0.2  } },
     // chip 0, ch 1 — bg_opacity
     KnobEntry { chip: 0, ch: 1, write: ParamWrite::Float { field: |p| &mut p.bg_opacity,      min: 0.0,   max: 1.0  } },
-    // chip 0, ch 2 — bgFxHueShift (CSS hue-rotate filter — no native equivalent; Phase 4 no-op)
+    // chip 0, ch 2 — bgFxHueShift (CSS hue-rotate filter — no native equivalent; no-op)
     KnobEntry { chip: 0, ch: 2, write: ParamWrite::Unmapped },
     // chip 0, ch 3 — glitch_scatter
     KnobEntry { chip: 0, ch: 3, write: ParamWrite::Float { field: |p| &mut p.glitch_scatter,  min: 0.045, max: 0.15 } },
     // chip 0, ch 4 — fig_brightness
     KnobEntry { chip: 0, ch: 4, write: ParamWrite::Float { field: |p| &mut p.fig_brightness,  min: 0.5,   max: 1.0  } },
-    // chip 0, ch 5 — bgAsciiLevel (background-as-ASCII luma layer — no native equivalent; Phase 4 no-op)
+    // chip 0, ch 5 — bgAsciiLevel (background-as-ASCII luma layer — no native equivalent; no-op)
     KnobEntry { chip: 0, ch: 5, write: ParamWrite::Unmapped },
     // chip 0, ch 6 — phosphor_index (discrete cycling via continuous knob)
     KnobEntry { chip: 0, ch: 6, write: ParamWrite::PhosphorIndex },
@@ -85,10 +85,10 @@ static KNOBS: &[KnobEntry] = &[
 
 /// Action to invoke when a confirmed button press is detected.
 pub(crate) enum ButtonAction {
-    /// Advance `phosphor_index` by one, wrapping. Phase 4 remap for GPIO 23 (was `next_bg`).
+    /// Advance `phosphor_index` by one, wrapping. GPIO 23 remap (was `next_bg`).
     /// Mirrors the P key behavior in sketch.js.
     CyclePhosphor,
-    /// Toggle a boolean `Params` field. Phase 4 remap for GPIO 24 (was `toggle_bg_ascii`).
+    /// Toggle a boolean `Params` field. GPIO 24 remap (was `toggle_bg_ascii`).
     /// GPIO 24 → `bg_enabled`, mirroring the B key.
     ToggleBool(fn(&mut Params) -> &mut bool),
     /// No action — reserved for future remapping.
@@ -101,10 +101,10 @@ pub(crate) struct ButtonEntry {
     pub action: ButtonAction,
 }
 
-/// Button mapping table — mirrors bridge.py `BUTTON_CONFIG` with interim action remaps.
+/// Button mapping table — mirrors bridge.py `BUTTON_CONFIG` with action remaps.
 ///
-/// Original bridge.py events (`next_bg`, `toggle_bg_ascii`) had no native equivalent in
-/// Phase 4. Interim remaps confirmed by user 2026-06-28:
+/// The original bridge.py events (`next_bg`, `toggle_bg_ascii`) have no native equivalent,
+/// so the two GPIO buttons are remapped:
 ///   GPIO 23 → CyclePhosphor (P-key analog)
 ///   GPIO 24 → ToggleBool(bg_enabled) (B-key analog)
 static BUTTONS: &[ButtonEntry] = &[
@@ -122,8 +122,8 @@ pub(crate) struct LedEntry {
 }
 
 /// LED mapping table — mirrors bridge.py `LED_CONFIG`.
-/// Six GPIO outputs driven by audio band levels. Phase 4: threshold on/off only.
-/// Software-PWM dimming deferred to Phase 5.
+/// Six GPIO outputs driven by audio band levels. Threshold on/off only;
+/// software-PWM dimming is future work (see ARCHITECTURE.md).
 static LEDS: &[LedEntry] = &[
     LedEntry { gpio: 17, band: LedBand::Sub },
     LedEntry { gpio: 27, band: LedBand::Bass },
@@ -170,7 +170,7 @@ pub(crate) fn apply_knob(entry: &KnobEntry, smoothed: f32, params: &mut Params) 
             let idx = (smoothed * count as f32) as usize;
             params.phosphor_index = idx.min(count - 1);
         }
-        ParamWrite::Unmapped => {} // physical channel has no native param in Phase 4
+        ParamWrite::Unmapped => {} // physical channel has no native param yet
     }
 }
 
@@ -365,7 +365,7 @@ pub struct GpioHardwareInput {
     btn_disconnected: bool,
 
     /// Incremented each `poll()` call; used to gate the `CRT_HW_DEBUG` env-var check
-    /// to ~1 Hz instead of every 30 Hz tick (matches the Phase 3 `audio.rs` pattern).
+    /// to ~1 Hz instead of every 30 Hz tick (matches the `audio.rs` pattern).
     dbg_tick: u32,
 
     /// Cached result of the last `CRT_HW_DEBUG` env-var check.
@@ -494,7 +494,7 @@ impl GpioHardwareInput {
 #[cfg(target_os = "linux")]
 impl HardwareInput for GpioHardwareInput {
     fn poll(&mut self, params: &mut Params, bands: Bands) {
-        // Gate env-var check to ~1 Hz (every 30 ticks) — matches the Phase 3 audio.rs
+        // Gate env-var check to ~1 Hz (every 30 ticks) — matches the audio.rs
         // pattern. At 30 Hz a per-tick syscall is negligible, but consistency matters.
         self.dbg_tick = self.dbg_tick.wrapping_add(1);
         if self.dbg_tick % 30 == 0 {
@@ -572,7 +572,7 @@ impl HardwareInput for GpioHardwareInput {
         }
 
         // ── 3. LED outputs from band levels ────────────────────────────────────
-        // Phase 4: threshold on/off. Software-PWM dimming deferred to Phase 5.
+        // Threshold on/off. Software-PWM dimming is future work.
         for (pin, entry) in self.led_pins.iter_mut().zip(LEDS.iter()) {
             if band_level(&bands, &entry.band) > LED_THRESHOLD {
                 pin.set_high();
@@ -977,7 +977,7 @@ mod tests {
         let ch0_count = KNOBS.iter().filter(|e| e.chip == 0 && e.ch == 0).count();
         assert_eq!(ch0_count, 3, "chip 0 ch 0 must drive exactly 3 knob entries");
 
-        // ch 2 and ch 5 must be Unmapped (no native param in Phase 4).
+        // ch 2 and ch 5 must be Unmapped (no native param yet).
         let unmapped: Vec<_> = KNOBS.iter()
             .filter(|e| matches!(e.write, ParamWrite::Unmapped))
             .collect();

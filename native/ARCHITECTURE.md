@@ -1,12 +1,11 @@
-# crt-vizzie native — MVP architecture
+# crt-vizzie native — architecture
 
 A native **Rust libretro frontend** that runs an N64 emulator core and composites the
 crt-vizzie audio-reactive ASCII visualizer over the live game frame, on a Raspberry Pi 5.
 
-This document is the architectural entry point for the native port. For the de-risking
-spike that gates the whole effort, see [`PHASE0_SPIKE.md`](./PHASE0_SPIKE.md). For the
-visual-engine behaviour being ported, the source of truth remains the `v2/` web app and
-the root [`CLAUDE.md`](../CLAUDE.md).
+This document is the architectural entry point for the native app. For the visual-engine
+behaviour being ported, the source of truth remains the `v2/` web app and the root
+[`CLAUDE.md`](../CLAUDE.md).
 
 ---
 
@@ -28,7 +27,7 @@ the audio reactivity that is the soul of the app.
 
 ## The mental model: three independent inputs
 
-The MVP's defining property is that its three inputs are fully decoupled — none feeds another:
+The defining property of the design is that its three inputs are fully decoupled — none feeds another:
 
 ```
   N64 core ─────► game texture ───┐
@@ -40,7 +39,7 @@ The MVP's defining property is that its three inputs are fully decoupled — non
 - **Live audio** from a USB audio interface drives reactivity (NOT game audio, NOT mic/file/demo).
 - **Hardware bridge** (`pi/bridge.py`, unchanged) drives tunable params over WebSocket.
 
-There is **no luma coupling and no game-audio coupling** in the MVP. The bgAscii layer (which
+There is **no luma coupling and no game-audio coupling**. The bgAscii layer (which
 is the only consumer of game-frame luma) is off by default and deferred.
 
 ---
@@ -116,28 +115,28 @@ the Pi's GLES3 (v3d) near-verbatim.
 
 ---
 
-## Visualization modes (the G key)
+## The visualization: edge-masked fusion
 
-`Params::viz_mode` selects what fills the glyph grid; the **G** key cycles it. Both modes share
-the entire CRT post chain (atlas sampling, chromatic aberration, scanline, phosphor) — only the
-*source* of each cell's glyph + brightness differs, via a `u_mode` branch in the one fragment
-shader.
+The app has one visualization: the **fusion animation (`fusion.rs`), masked by the game's edges
+and dark/negative space**. Fusion fills the data textures every frame as always; the fragment
+shader fetches each cell's glyph/brightness/color, then multiplies brightness by a mask derived
+from the game frame:
 
-- **0 — Fusion (default).** The figure/rain/wave/glitch engine (`fusion.rs`) fills the data
-  textures, composited *over* the game via screen blend (above).
-- **1 — Edge.** The **exact same fusion animation, masked by the game's edges**. Fusion still
-  fills the data textures every frame; the shader fetches each cell's glyph/brightness/color as
-  usual, then multiplies brightness by an edge factor: a cell-scale Sobel on `u_gameTex` (sample
-  offsets = `1/gridSize`, so the mask matches the glyph grid, not per-texel noise) →
-  `clamp((mag - u_edgeThreshold) * u_edgeGain, 0, 1)`, combined with a **dark/negative-space**
-  term `u_darkLevel * smoothstep(u_darkThreshold, 0, cm)` (cell-center luma `cm`) via `max()`. So
-  the rain/wave/glitch/figure show along the on-screen shapes *and* fill the dark background,
-  carving the bright shapes out of an animated negative space, screen-blended over the live game
-  via the same composite as Fusion mode (**B** toggles the underlay off).
-  Audio-reactive: the `edge_beat_current` envelope (`main.rs`) bumps `edge_gain` on beats so more
-  of the animation breaks through, and bass drives the shared chroma aberration. **Zero GPU→CPU
-  readback** — the game frame is already a texture in our context. With no game frame bound,
-  `u_gamePresent = 0` → the mask is 0 (nothing shows).
+- **Edge term** — a cell-scale Sobel on `u_gameTex` (sample offsets = `1/gridSize`, so the mask
+  matches the glyph grid, not per-texel noise) → `clamp((mag - u_edgeThreshold) * u_edgeGain, 0, 1)`.
+- **Dark term** — `u_darkLevel * smoothstep(u_darkThreshold, 0, cm)` on the cell-center luma `cm`,
+  so darker cells fill with more animation.
+
+The two combine via `max()`: the rain/wave/glitch/figure show along the on-screen shapes *and*
+fill the dark background, carving the bright shapes out of an animated negative space. The result
+is screen-blended over the live game (**B** toggles the underlay off for glyphs-on-black).
+Audio-reactive: the `edge_beat_current` envelope (`main.rs`) bumps `edge_gain` on beats so more
+of the animation breaks through, and bass drives the shared chroma aberration. **Zero GPU→CPU
+readback** — the game frame is already a texture in our context. With no game frame bound,
+`u_gamePresent = 0` → the mask is 0 (nothing shows).
+
+(An earlier build had a second "full fusion" mode toggled by **G**; that toggle was removed once
+this became the single mode. The fusion engine itself stays — it is what the mask reveals.)
 
 ## Audio: cpal → rustfft, faithfully
 
@@ -183,12 +182,12 @@ working web app:
 - **`atlas.json`** = `{cellW, cellH, tileW, tileH, atlasCols, atlasRows, charset[]}` (feeds the
   shader uniforms + builds the `char→index` map).
 
-Zero font code in the MVP, pixel-identical glyphs. Add runtime rasterization later only if
+Zero font code, pixel-identical glyphs. Add runtime rasterization later only if
 font/size needs to change at runtime.
 
 ---
 
-## Cut / deferred from the MVP
+## Not ported from the web app
 
 | Cut | Why |
 |---|---|
@@ -201,23 +200,35 @@ font/size needs to change at runtime.
 
 ---
 
-## Risk ranking
+## Known limitations & future work
 
-1. **HW-render / GLideN64 context handshake — high.** Concentrated entirely in Phase 0.
-2. **cpal USB device selection + FFT-feel match — medium.**
-3. **bridge clamp parity + fusion/renderer transcription — low.** Visually diffable against the
-   live web app.
+These are the deferred items and rough edges, kept here (not as inline `TODO`s) so the code
+stays feature-focused.
 
-## Phased roadmap
+**Pi (GLES3) portability of the software-frame path.** `upload_sw_texture` in `main.rs` uploads
+CPU frames with the `glow::BGRA` client format, which is desktop-GL-only. On the Pi's GLES3 this
+path must upload `RGBA` and swap R↔B via texture swizzle (`TEXTURE_SWIZZLE_R/B`) under
+`cfg(not(windows))`. The hardware-FBO path (GLideN64) is unaffected.
 
-- **Phase 0** — de-risk spike (see `PHASE0_SPIKE.md`). ROM → FBO texture → quad, full speed, on Pi 5.
-- **Phase 1** — renderer port: baked atlas + data textures + composite shader over the game texture.
-- **Phase 2** — fusion port: figure/rain/wave/glitch + the 30 Hz logic tick + chroma envelope.
-- **Phase 3** — audio: cpal USB capture → rustfft → bands/beat.
-- **Phase 4** — bridge: `bridge.rs` client + button remap.
-- **Phase 5** — kiosk: Pi 5 autostart, overclock, fullscreen.
+**FBO depth/stencil.** `build_game_fbo` attaches only `DEPTH24`, matching the cores tested so far
+(`stencil=false`). A core that requests `hw.stencil=true` (GLideN64 can, for some N64 framebuffer
+effects) would need `DEPTH24_STENCIL8` + `DEPTH_STENCIL_ATTACHMENT`.
 
-## Cargo dependencies (full MVP)
+**Audio input device selection.** `audio.rs` opens only cpal's default input device — no
+enumeration, no CLI flag. Selecting a specific USB interface by name is future work.
 
-`sdl2`, `glow`, `libloading`, `rust-libretro-sys`, `cpal`, `rustfft`, `tokio`,
-`tokio-tungstenite`, `serde`, `serde_json`. (The Phase 0 spike needs only the first four.)
+**LED dimming.** The GPIO LED bank (`hw_input.rs`) is threshold on/off only; software-PWM
+brightness is future work.
+
+**Hardware bridge.** A `bridge.rs` WebSocket client (to `pi/bridge.py`, sending audio bands back
+at ~16 Hz for the LEDs) is not yet implemented; live params currently come from the local GPIO
+path and keyboard.
+
+**Kiosk deployment.** Pi 5 autostart, overclock, and boot-to-fullscreen are not yet scripted.
+
+## Cargo dependencies
+
+Current: `sdl2`, `glow`, `libloading`, `cpal`, `rustfft`, `image`, `serde`, `serde_json`
+(+ `rppal` on Linux/Pi for GPIO). The libretro ABI is transcribed by hand in `libretro.rs`
+rather than via a generated-bindings crate. The hardware bridge, when built, will add
+`tokio` + `tokio-tungstenite`.

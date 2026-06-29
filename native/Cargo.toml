@@ -1,37 +1,36 @@
 [package]
-name = "crt-vizzie-spike"
+name = "crt-vizzie"
 version = "0.0.0"
 edition = "2021"
-description = "Phase 0 de-risking spike: N64 libretro core -> frontend-owned GLES3 texture -> screen"
+description = "Native N64 libretro frontend compositing the crt-vizzie audio-reactive ASCII visualizer over the live game frame"
 publish = false
 
 [[bin]]
-name = "crt-vizzie-spike"
+name = "crt-vizzie"
 path = "src/main.rs"
 
 [dependencies]
 # Thin GL/GLES bindings; entry points are loaded at runtime via SDL's proc-address loader.
 glow = "0.13"
 
-# Phase 3: USB audio capture (WASAPI on Windows; ALSA on Pi — requires libasound2-dev at build time).
+# USB audio capture (WASAPI on Windows; ALSA on Pi — requires libasound2-dev at build time).
 cpal = "0.15"
 
-# Phase 3: FFT for the analysis pipeline (plan_fft_forward, process_with_scratch).
+# FFT for the audio analysis pipeline (plan_fft_forward, process_with_scratch).
 rustfft = "6"
 
 # dlopen the libretro core (.so / .dll / .dylib) and resolve its symbols.
 libloading = "0.8"
 
-# Phase 1: decode the baked glyph atlas PNG (png-only to keep build time/deps down) and parse
+# Decode the baked glyph atlas PNG (png-only to keep build time/deps down) and parse
 # atlas.json metrics.
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# M2+ ONLY (env callback + hw-render handshake): bring in authoritative libretro
-# constants/structs rather than transcribing libretro.h by hand. Uncomment and pin a
-# real version with `cargo add rust-libretro-sys` when you start M2.
-# rust-libretro-sys = "0.2"
+# The libretro ABI (env callback, hw-render handshake, structs) is transcribed by hand in
+# libretro.rs to avoid a heavy generated-bindings dependency. If that becomes a maintenance
+# burden, `rust-libretro-sys = "0.2"` provides authoritative constants/structs.
 
 # Windowing + GLES3 context.
 # Windows: build SDL2 from source and static-link it (needs cmake + the MSVC C++ build
@@ -43,7 +42,7 @@ sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
 [target.'cfg(not(windows))'.dependencies]
 sdl2 = "0.37"
 
-# Phase 4: GPIO + SPI for Pi 5 hardware panel. rppal >= 0.19 is required for Pi 5's RP1
+# GPIO + SPI for the Pi 5 hardware panel. rppal >= 0.19 is required for the Pi 5's RP1
 # I/O controller (character-device GPIO API). This dep is Linux-target-gated so the
 # Windows dev-machine build pulls in zero new transitive deps.
 [target.'cfg(target_os = "linux")'.dependencies]

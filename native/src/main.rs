@@ -26,8 +26,8 @@ struct Args {
 // ── Unit tests ────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
-    /// Simulate the 30 Hz accumulator logic from run_window:
-    ///   logic_accum = logic_accum.min(4.0 * LOGIC_DT);  // FIX 1
+    /// Simulate the 30 Hz logic-tick accumulator from run_window:
+    ///   logic_accum = logic_accum.min(4.0 * LOGIC_DT);   // catch-up cap
     ///   while logic_accum >= LOGIC_DT { ...; logic_accum -= LOGIC_DT; }
     /// Returns the number of ticks that would fire.
     fn count_ticks(initial_accum: f32, logic_dt: f32) -> usize {
@@ -42,8 +42,8 @@ mod tests {
 
     const LOGIC_DT: f32 = 1.0 / 30.0;
 
-    /// FIX 1: a large stall (shader compile can take hundreds of ms) must produce
-    /// at most 4 fusion ticks, never a burst of 30+ that would spiral the state.
+    /// A large stall (shader compile can take hundreds of ms) must produce at most 4 fusion
+    /// ticks, never a burst of 30+ that would spiral the state.
     #[test]
     fn accumulator_cap_limits_to_four_ticks() {
         // 1 second stall = 30 LOGIC_DTs worth of accumulation → capped to 4 ticks.
@@ -61,8 +61,8 @@ mod tests {
             "10× LOGIC_DT stall must be capped to 4");
     }
 
-    /// FIX 2: logic_accum initialises to LOGIC_DT (not 0) so frame 1 fires exactly
-    /// one tick, avoiding an all-black first frame.
+    /// logic_accum initialises to LOGIC_DT (not 0) so frame 1 fires exactly one tick,
+    /// avoiding an all-black first frame.
     #[test]
     fn first_frame_tick_fires_with_initial_logic_dt() {
         let initial_accum = LOGIC_DT; // matches: let mut logic_accum: f32 = LOGIC_DT;
@@ -79,17 +79,17 @@ mod tests {
         assert_eq!(count_ticks(2.0 * LOGIC_DT, LOGIC_DT), 2, "2× LOGIC_DT → 2 ticks");
         // Just under 1 LOGIC_DT → 0 ticks (no half-tick).
         assert_eq!(count_ticks(LOGIC_DT * 0.99, LOGIC_DT), 0, "0.99× LOGIC_DT → 0 ticks");
-        // FIX 1 + FIX 2 compose: initial LOGIC_DT is within the 4× cap ceiling.
-        assert!(LOGIC_DT <= 4.0 * LOGIC_DT, "FIX 1 does not reduce the FIX 2 primed tick");
+        // The catch-up cap and the primed first tick compose: the initial LOGIC_DT is within
+        // the 4× cap ceiling, so priming the first frame is never clamped away.
+        assert!(LOGIC_DT <= 4.0 * LOGIC_DT, "the catch-up cap must not reduce the primed first tick");
     }
 }
 
 fn print_usage() {
-    eprintln!("usage: crt-vizzie-spike [--core <libretro-core>] [--rom <rom>] [--demo-mode]");
-    eprintln!("  no args     -> M0 (magenta window)");
-    eprintln!("  --core      -> M0 + M1 (also load the core and print its system info)");
-    eprintln!("  --rom       -> consumed starting at M3 (load_game)");
-    eprintln!("  --demo-mode -> synthetic animated source, ignores audio input");
+    eprintln!("usage: crt-vizzie [--core <libretro-core>] [--rom <rom>] [--demo-mode]");
+    eprintln!("  --core      load the libretro core (else ./cores/<platform-default>)");
+    eprintln!("  --rom       game ROM to run and visualize");
+    eprintln!("  --demo-mode synthetic animated audio source, ignores live audio input");
 }
 
 fn parse_args() -> Args {
@@ -106,7 +106,7 @@ fn parse_args() -> Args {
                 print_usage();
                 std::process::exit(0);
             }
-            other => eprintln!("[spike] ignoring unknown arg: {other}"),
+            other => eprintln!("[crt] ignoring unknown arg: {other}"),
         }
     }
     Args { core, rom, demo }
@@ -118,7 +118,7 @@ fn main() -> ExitCode {
     // Use --core if given, else fall back to ./cores/<platform-default> next to the exe.
     let core_path = args.core.clone().or_else(platform::default_core_path);
 
-    // ── M1: load the core (optional) and print its identity ──────────────────
+    // Load the core (optional) and print its identity.
     let core = match &core_path {
         Some(path) => {
             // SAFETY: we trust the user-supplied path to be a real libretro core.
@@ -128,20 +128,19 @@ fn main() -> ExitCode {
                     Some(c)
                 }
                 Err(e) => {
-                    eprintln!("[spike] failed to load core {path:?}: {e}");
+                    eprintln!("[crt] failed to load core {path:?}: {e}");
                     return ExitCode::FAILURE;
                 }
             }
         }
         None => {
-            eprintln!("[spike] no core (pass --core <path> or drop one in ./cores/); M0 window only");
+            eprintln!("[crt] no core (pass --core <path> or drop one in ./cores/); window only");
             None
         }
     };
 
-    // ── M0: window + GLES3 context + clear loop ──────────────────────────────
     if let Err(e) = run_window(core, args.rom, args.demo) {
-        eprintln!("[spike] fatal: {e}");
+        eprintln!("[crt] fatal: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -154,40 +153,40 @@ fn run_window(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use glow::HasContext;
 
-    let mut gfx = sdl_gl::Gfx::new("crt-vizzie spike", 1280, 720)?;
-    println!("[spike] GL_VERSION: {}", gfx.gl_version());
+    let mut gfx = sdl_gl::Gfx::new("crt-vizzie", 1280, 720)?;
+    println!("[crt] GL_VERSION: {}", gfx.gl_version());
 
-    // ── M2: register callbacks + initialize the core ─────────────────────────
-    // The GL context (created above) must exist first: at M3 the core requests a hardware-render
-    // context to share via SET_HW_RENDER, and our get_proc_address hands it this ANGLE/GLES3 one.
+    // Register callbacks + initialize the core. The GL context (created above) must exist first:
+    // the core requests a hardware-render context to share via SET_HW_RENDER during load_game,
+    // and our get_proc_address hands it this context.
     if let Some(c) = &core {
         unsafe { frontend::init_core(c) };
-        println!("[spike] retro_init complete — core initialized");
+        println!("[crt] retro_init complete — core initialized");
     }
 
-    // ── M3a: load the ROM and observe the core's hw-render request ────────────
+    // Load the ROM and observe the core's hw-render request.
     let mut game_loaded = false;
     if let (Some(c), Some(rom_path)) = (&core, &rom) {
         match unsafe { frontend::load_game(c, rom_path) } {
             Ok(true) => {
                 game_loaded = true;
-                println!("[spike] retro_load_game OK");
+                println!("[crt] retro_load_game OK");
                 let t = frontend::hw_context_type();
                 println!(
-                    "[spike] hw-render requested: {} (type={}), accepted={}",
+                    "[crt] hw-render requested: {} (type={}), accepted={}",
                     frontend::context_type_name(t),
                     t,
                     frontend::hw_accepted()
                 );
             }
-            Ok(false) => println!("[spike] retro_load_game returned FALSE (core refused the ROM)"),
-            Err(e) => println!("[spike] could not read ROM {rom_path:?}: {e}"),
+            Ok(false) => println!("[crt] retro_load_game returned FALSE (core refused the ROM)"),
+            Err(e) => println!("[crt] could not read ROM {rom_path:?}: {e}"),
         }
     } else if core.is_some() {
-        println!("[spike] no --rom given; skipping load_game");
+        println!("[crt] no --rom given; skipping load_game");
     }
 
-    // ── M3b: build the game FBO and reset the core's GL context ───────────────
+    // Build the game FBO and reset the core's GL context.
     let mut game: Option<GameFbo> = None;
     if let Some(c) = &core {
         if frontend::hw_accepted() {
@@ -204,7 +203,7 @@ fn run_window(
                 h = 480;
             }
             println!(
-                "[spike] av_info: base {}x{}, max {}x{}, fps {:.3}",
+                "[crt] av_info: base {}x{}, max {}x{}, fps {:.3}",
                 av.geometry.base_width, av.geometry.base_height,
                 av.geometry.max_width, av.geometry.max_height, av.timing.fps
             );
@@ -212,20 +211,20 @@ fn run_window(
             match unsafe { build_game_fbo(&gfx.gl, w, h) } {
                 Ok(g) => {
                     frontend::set_fbo(g.fbo.0.get());
-                    println!("[spike] game FBO {w}x{h} complete (gl id={})", g.fbo.0.get());
-                    // The core builds its GL resources here (GLideN64 init — the real test).
+                    println!("[crt] game FBO {w}x{h} complete (gl id={})", g.fbo.0.get());
+                    // The core builds its GL resources here (GLideN64 init).
                     unsafe { frontend::context_reset() };
-                    println!("[spike] context_reset done — core GL initialized");
+                    println!("[crt] context_reset done — core GL initialized");
                     // GLideN64 leaves its own FBO bound; restore the default for our clear.
                     unsafe { gfx.gl.bind_framebuffer(glow::FRAMEBUFFER, None) };
                     game = Some(g);
                 }
-                Err(e) => println!("[spike] FBO build FAILED: {e}"),
+                Err(e) => println!("[crt] FBO build FAILED: {e}"),
             }
         }
     }
 
-    // ── Phase 1: the ASCII renderer (composites ASCII over the game texture) ──
+    // The ASCII renderer (composites the masked ASCII animation over the game texture).
     let mut params = config::Params::default();
     let mut ascii = match unsafe { renderer::AsciiRenderer::new(&gfx.gl) } {
         Ok(r) => r,
@@ -260,21 +259,21 @@ fn run_window(
         t
     };
 
-    // Phase 3: --demo-mode → synthetic source; else open default cpal input, falling back to
-    // a silent (blank/idle) source if no device is available.
+    // Audio source: --demo-mode → synthetic source; else open the default cpal input, falling
+    // back to a silent (blank/idle) source if no device is available.
     let mut audio = audio::new_source(demo);
-    // Phase 4: GPIO knobs/buttons/LEDs on Pi 5; no-op DevHardwareInput stub elsewhere.
+    // Hardware input: GPIO knobs/buttons/LEDs on the Pi; no-op stub on other platforms.
     let mut hw = hw_input::new_hardware_input();
     let charset: Vec<String> = ascii.charset().to_vec();  // clone once at startup
     let mut fusion = fusion::Fusion::new(ascii.cols(), ascii.rows(), &charset);
 
     // 30 Hz logic-tick accumulator (decoupled from display frame rate).
-    // Pre-load one tick so the first rendered frame is never all-black (FIX 2).
+    // Pre-load one tick so the first rendered frame is never all-black.
     const LOGIC_DT: f32         = 1.0 / 30.0;
     let mut logic_accum:    f32 = LOGIC_DT;
     let mut last_logic_tick     = std::time::Instant::now();
 
-    // ── M4 + M5 loop: run the core, then display the hardware FBO or the software frame ──
+    // Main loop: run the core, then composite the masked animation over its frame.
     'main: loop {
         let events: Vec<_> = gfx.event_pump.poll_iter().collect();
         for event in events {
@@ -303,11 +302,6 @@ fn run_window(
                 Event::KeyDown { keycode: Some(Keycode::B), .. } => {
                     params.bg_enabled = !params.bg_enabled;
                     eprintln!("[renderer] bg_enabled: {}", params.bg_enabled);
-                }
-                Event::KeyDown { keycode: Some(Keycode::G), .. } => {
-                    params.viz_mode = (params.viz_mode + 1) % config::VIZ_MODE_COUNT;
-                    let name = if params.viz_mode == 1 { "edge" } else { "fusion" };
-                    eprintln!("[renderer] viz_mode: {} ({})", params.viz_mode, name);
                 }
                 Event::KeyDown { keycode: Some(Keycode::F), .. } => {
                     use sdl2::video::FullscreenType;
@@ -342,7 +336,7 @@ fn run_window(
             logic_accum += now.duration_since(last_logic_tick).as_secs_f32();
             last_logic_tick = now;
             // Cap catch-up to 4 ticks so a long shader-compile stall on the first
-            // (c.run)() call cannot trigger a spiral of accumulated fusion updates (FIX 1).
+            // (c.run)() call cannot trigger a spiral of accumulated fusion updates.
             logic_accum = logic_accum.min(4.0 * LOGIC_DT);
 
             while logic_accum >= LOGIC_DT {
@@ -359,14 +353,13 @@ fn run_window(
                 params.chroma_beat_current = params.chroma_beat_current * 0.85
                     + audio.beat_intensity() * params.chroma_beat * 0.15;
 
-                // 3b. Edge-mode beat envelope: pulses edge brightness on beats (mirrors the
-                //     chroma envelope above). Kept running in both modes so it's warm on toggle.
+                // 3b. Edge beat envelope: pulses edge brightness on beats (mirrors the chroma
+                //     envelope above so more of the animation breaks through on the beat).
                 params.edge_beat_current = params.edge_beat_current * 0.85
                     + audio.beat_intensity() * params.edge_beat_boost * 0.15;
 
-                // 4. Build the audio frame and run fusion. Both modes use the fusion output:
-                //    Fusion mode shows it in full; Edge mode masks it by the game's edges in
-                //    the shader (so the same animation only shows along the on-screen shapes).
+                // 4. Build the audio frame and run fusion. The shader masks this animation by the
+                //    game's edges + dark space (so it shows along the on-screen shapes).
                 let frame = fusion::AudioFrame {
                     spectrum:       audio.spectrum(),
                     bands:          audio.bands(),
@@ -453,9 +446,8 @@ unsafe fn upload_sw_texture(
     buf: &[u8],
 ) {
     use glow::HasContext;
-    // TODO(review,pi): glow::BGRA is NOT a valid client format on native GLES3 (the Pi). On GLES3,
-    // upload as RGBA and swap R<->B via texture swizzle (TEXTURE_SWIZZLE_R/B) under cfg(not(windows)).
-    // This path works on Windows desktop GL only.
+    // The BGRA client format below is desktop-GL only (Windows). The Pi's GLES3 path needs RGBA
+    // + an R/B texture swizzle instead — see ARCHITECTURE.md ("Known limitations & future work").
     gl.bind_texture(glow::TEXTURE_2D, Some(tex));
     match fmt {
         // XRGB8888: native u32 0xFFRRGGBB → little-endian bytes B,G,R,X → BGRA8.
@@ -476,7 +468,7 @@ unsafe fn upload_sw_texture(
     }
 }
 
-/// Game framebuffer: the FBO the core renders into + its color texture (sampled at M5).
+/// Game framebuffer: the FBO the core renders into + its color texture (sampled each frame).
 struct GameFbo {
     fbo: glow::NativeFramebuffer,
     color: glow::NativeTexture,
@@ -484,7 +476,7 @@ struct GameFbo {
     h: i32,
 }
 
-/// M3b: build the FBO the core renders into — an RGBA8 color texture + a DEPTH24 renderbuffer
+/// Build the FBO the core renders into — an RGBA8 color texture + a DEPTH24 renderbuffer
 /// (the core requested `depth=true`). Returns the framebuffer; the caller publishes its GL name.
 ///
 /// # Safety
@@ -507,9 +499,9 @@ unsafe fn build_game_fbo(gl: &glow::Context, w: i32, h: i32) -> Result<GameFbo, 
         glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color), 0,
     );
 
-    // TODO(review,pi): only DEPTH24 is attached. If a core sets hw.stencil=true (GLideN64 can, for
-    // some N64 framebuffer effects), switch to DEPTH24_STENCIL8 + DEPTH_STENCIL_ATTACHMENT.
-    // mupen64plus ran with stencil=false, so this is latent.
+    // Only DEPTH24 is attached, matching the cores tested so far (stencil=false). A core that
+    // requests hw.stencil=true would need DEPTH24_STENCIL8 + DEPTH_STENCIL_ATTACHMENT instead —
+    // see ARCHITECTURE.md ("Known limitations & future work").
     let depth = gl.create_renderbuffer()?;
     gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
     gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, w, h);
