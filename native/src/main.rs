@@ -291,6 +291,10 @@ fn run_window(
     let mut logic_accum:    f32 = LOGIC_DT;
     let mut last_logic_tick     = std::time::Instant::now();
 
+    // Calm-idle activity level (0 = silence, 1 = lively), read from fusion each tick. Gates the
+    // dark-fill and glitch FX so a silent input shows a minimal, near-static screen.
+    let mut activity: f32 = 0.0;
+
     // Main loop: run the core, then composite the masked animation over its frame.
     'main: loop {
         let events: Vec<_> = gfx.event_pump.poll_iter().collect();
@@ -386,8 +390,10 @@ fn run_window(
                 //     Decay the burst envelope, then maybe kick off a new momentary burst —
                 //     random chance, more likely on a strong beat — with a fresh random seed.
                 params.glitch_fx_env *= params.glitch_fx_decay;
+                //     Calm-idle: scale the random burst chance by activity so a silent input
+                //     barely glitches. Beats still trigger directly (their kick is audio-driven).
                 let beat_kick = if audio.beat_active() { audio.beat_intensity() * 0.08 } else { 0.0 };
-                if glitch_rng.rand() < params.glitch_fx_chance + beat_kick {
+                if glitch_rng.rand() < params.glitch_fx_chance * activity + beat_kick {
                     params.glitch_fx_env = 0.6 + glitch_rng.rand() * 0.4;
                     params.glitch_fx_seed = glitch_rng.rand() * 1000.0;
                 }
@@ -402,6 +408,7 @@ fn run_window(
                     live:           audio.is_live(),
                 };
                 fusion.update(&frame, ascii.cols(), ascii.rows(), &params);
+                activity = fusion.activity();
 
                 logic_accum -= LOGIC_DT;
             }
@@ -449,7 +456,7 @@ fn run_window(
             // Pass 1: render the scene (game + ASCII animation) into the offscreen FBO.
             post.bind_scene(&gfx.gl, win_w, win_h);
             ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
-            ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h);
+            ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h, activity);
             // Pass 2: full-screen glitch/warp post-process → default framebuffer.
             post.render(&gfx.gl, &params, start_time.elapsed().as_secs_f32(), win_w, win_h);
             // UI overlay on top (drawn after the glitch so it stays readable).

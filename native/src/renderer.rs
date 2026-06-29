@@ -77,6 +77,7 @@ uniform float u_edgeThreshold;   // min Sobel magnitude before a cell shows thro
 uniform float u_edgeGain;        // magnitude to mask scale (incl. beat boost)
 uniform float u_darkThreshold;   // cells darker than this become animation space
 uniform float u_darkLevel;       // max intensity (0..1) of the dark-space animation
+uniform float u_activity;        // audio activity 0..1 (calm-idle: low = quiet/minimal)
 uniform float u_gamePresent;     // 1.0 when a game frame is bound, else 0.0
 
 in  vec2 v_uv;
@@ -149,7 +150,10 @@ void main() {
   // animation fills it. Use the cell-center luma (cm), not the gradient. smoothstep gives a
   // gentle ramp from the threshold down to black; u_darkLevel caps the strength.
   float cm   = gameLuma(cuv);
-  float dark = u_darkLevel * smoothstep(u_darkThreshold, 0.0, cm);
+  // Calm-idle: the dark/negative-space fill recedes toward a low floor when there's little audio
+  // activity, so silence shows minimal characters (the edge outline still reads).
+  float idle = 0.15 + 0.85 * clamp(u_activity, 0.0, 1.0);
+  float dark = idle * u_darkLevel * smoothstep(u_darkThreshold, 0.0, cm);
   bright *= max(edge, dark) * u_gamePresent;
 
   vec2 fragInCell = fragCoord - vec2(cellPos) * u_cellSize;
@@ -249,7 +253,8 @@ impl AsciiRenderer {
             "u_atlasTileSize", "u_atlasDims", "u_atlasTexSize", "u_phosphorDim", "u_phosphorMid",
             "u_phosphorBright", "u_chromaOffset", "u_scanline", "u_scanlineMode", "u_cgaColors",
             "u_gameTex", "u_gameUvScale", "u_gameFlip", "u_bgEnabled", "u_bgOpacity",
-            "u_edgeThreshold", "u_edgeGain", "u_darkThreshold", "u_darkLevel", "u_gamePresent",
+            "u_edgeThreshold", "u_edgeGain", "u_darkThreshold", "u_darkLevel", "u_activity",
+            "u_gamePresent",
         ];
         let mut uniforms = HashMap::new();
         for n in names {
@@ -343,6 +348,7 @@ impl AsciiRenderer {
         game_flip: f32,
         win_w: u32,
         win_h: u32,
+        activity: f32,
     ) {
         gl.use_program(Some(self.program));
 
@@ -388,6 +394,7 @@ impl AsciiRenderer {
         gl.uniform_1_f32(self.u("u_edgeGain"), params.edge_gain + params.edge_beat_current);
         gl.uniform_1_f32(self.u("u_darkThreshold"), params.edge_dark_threshold);
         gl.uniform_1_f32(self.u("u_darkLevel"), params.edge_dark_level);
+        gl.uniform_1_f32(self.u("u_activity"), activity);
         gl.uniform_1_f32(self.u("u_gamePresent"), if game_tex.is_some() { 1.0 } else { 0.0 });
 
         gl.disable(glow::DEPTH_TEST);
