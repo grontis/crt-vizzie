@@ -72,8 +72,23 @@ uniform float u_gameFlip;
 uniform float u_bgEnabled;
 uniform float u_bgOpacity;
 
+// Edge mode (viz_mode == 1): contour line-art derived from the game frame.
+uniform int   u_mode;          // 0 = fusion (data textures), 1 = edge-from-game
+uniform int   u_edgeGlyphs[4]; // atlas indices for the 4 stroke directions (vert/diag/horiz)
+uniform float u_edgeThreshold; // min Sobel magnitude before a cell lights up
+uniform float u_edgeGain;      // magnitude to brightness scale (incl. beat boost)
+uniform float u_gamePresent;   // 1.0 when a game frame is bound, else 0.0
+
 in  vec2 v_uv;
 out vec4 fragColor;
+
+// Luma of the game frame at a [0,1] cell-space UV, honoring the same flip + uv-scale
+// as the composite path so edge sampling lines up with what gets drawn.
+float gameLuma(vec2 uv) {
+  float vy = mix(uv.y, 1.0 - uv.y, u_gameFlip);
+  vec3 c = texture(u_gameTex, vec2(uv.x * u_gameUvScale.x, vy * u_gameUvScale.y)).rgb;
+  return dot(c, vec3(0.299, 0.587, 0.114));
+}
 
 float sampleGlyph(int charIdx, vec2 fragInCell, float dxPixels) {
   int atlasCol = charIdx % u_atlasDims.x;
@@ -105,10 +120,40 @@ void main() {
     return;
   }
 
-  uvec4 data = texelFetch(u_cellData, cellPos, 0);
-  int   charIdx = int(data.r);
-  float bright  = float(data.g) / 65535.0;
-  int   cgaIdx  = int(texelFetch(u_cellColor, cellPos, 0).r * 255.0 + 0.5);
+  int   charIdx;
+  float bright;
+  int   cgaIdx;
+  if (u_mode == 1) {
+    // Edge mode: cell-scale Sobel of the game frame. Offsets span one cell in
+    // game-UV space so edges match the glyph grid (not noisy per-texel edges).
+    vec2 g   = vec2(u_gridSize);
+    vec2 cuv = (vec2(cellPos) + 0.5) / g;
+    vec2 o   = 1.0 / g;
+    float tl = gameLuma(cuv + vec2(-o.x, -o.y));
+    float tm = gameLuma(cuv + vec2( 0.0, -o.y));
+    float tr = gameLuma(cuv + vec2( o.x, -o.y));
+    float ml = gameLuma(cuv + vec2(-o.x,  0.0));
+    float mr = gameLuma(cuv + vec2( o.x,  0.0));
+    float bl = gameLuma(cuv + vec2(-o.x,  o.y));
+    float bm = gameLuma(cuv + vec2( 0.0,  o.y));
+    float br = gameLuma(cuv + vec2( o.x,  o.y));
+    float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+    float gy = (bl + 2.0 * bm + br) - (tl + 2.0 * tm + tr);
+    float mag = length(vec2(gx, gy));
+    // Gradient angle folded to [0, PI) (a gradient and its opposite are the same
+    // edge), then 4 buckets, each a stroke glyph that runs along the edge.
+    float ang = atan(gy, gx);
+    if (ang < 0.0) ang += 3.14159265;
+    int bucket = int(mod(floor(ang / (3.14159265 / 4.0) + 0.5), 4.0));
+    charIdx = u_edgeGlyphs[bucket];
+    bright  = clamp((mag - u_edgeThreshold) * u_edgeGain, 0.0, 1.0) * u_gamePresent;
+    cgaIdx  = 0; // phosphor monochrome
+  } else {
+    uvec4 data = texelFetch(u_cellData, cellPos, 0);
+    charIdx = int(data.r);
+    bright  = float(data.g) / 65535.0;
+    cgaIdx  = int(texelFetch(u_cellColor, cellPos, 0).r * 255.0 + 0.5);
+  }
 
   vec2 fragInCell = fragCoord - vec2(cellPos) * u_cellSize;
 
@@ -147,7 +192,10 @@ void main() {
   }
   color *= scanFactor;
 
-  // Game composite (replaces CSS mix-blend-mode: screen).
+  // Game composite (replaces CSS mix-blend-mode: screen). Both modes draw their
+  // glyphs over the live game frame: Fusion's figure/rain/glitch, or Edge's
+  // contours traced from that same frame. The B key (u_bgEnabled) still toggles
+  // the underlay off to fall back to glyphs-on-black.
   float game_vy = mix(v_uv.y, 1.0 - v_uv.y, u_gameFlip);
   vec3  game = texture(u_gameTex, vec2(v_uv.x * u_gameUvScale.x, game_vy * u_gameUvScale.y)).rgb * u_bgOpacity;
   vec3  outc = (u_bgEnabled > 0.5) ? (1.0 - (1.0 - game) * (1.0 - color)) : color;
@@ -166,6 +214,7 @@ pub struct AsciiRenderer {
     cols: usize,
     rows: usize,
     scratch: Vec<u8>, // RG16UI interleave, little-endian (n * 4 bytes)
+    edge_glyphs: [i32; 4], // atlas indices for the 4 edge stroke directions: | / - \
 }
 
 impl AsciiRenderer {
@@ -204,6 +253,7 @@ impl AsciiRenderer {
             "u_atlasTileSize", "u_atlasDims", "u_atlasTexSize", "u_phosphorDim", "u_phosphorMid",
             "u_phosphorBright", "u_chromaOffset", "u_scanline", "u_scanlineMode", "u_cgaColors",
             "u_gameTex", "u_gameUvScale", "u_gameFlip", "u_bgEnabled", "u_bgOpacity",
+            "u_mode", "u_edgeGlyphs", "u_edgeThreshold", "u_edgeGain", "u_gamePresent",
         ];
         let mut uniforms = HashMap::new();
         for n in names {
@@ -219,8 +269,23 @@ impl AsciiRenderer {
             flat[i * 3 + 1] = crate::config::CGA_COLORS[i][1];
             flat[i * 3 + 2] = crate::config::CGA_COLORS[i][2];
         }
+        // Edge-mode stroke glyphs, bucket-ordered to match the shader: | / - \.
+        // Looked up in the baked charset once; uploaded like the CGA palette (immutable).
+        let edge_chars = ['|', '/', '-', '\\'];
+        let mut edge_glyphs = [0i32; 4];
+        for (i, ch) in edge_chars.iter().enumerate() {
+            edge_glyphs[i] = m.charset
+                .iter()
+                .position(|s| s.chars().next() == Some(*ch))
+                .unwrap_or(0) as i32;
+            if edge_glyphs[i] == 0 {
+                eprintln!("[renderer] edge glyph {:?} not in atlas charset — edges will be blank", ch);
+            }
+        }
+
         gl.use_program(Some(program));
         gl.uniform_3_f32_slice(uniforms.get("u_cgaColors"), &flat);
+        gl.uniform_1_i32_slice(uniforms.get("u_edgeGlyphs"), &edge_glyphs);
         gl.use_program(None);
 
         let vao = gl.create_vertex_array()?;
@@ -232,7 +297,7 @@ impl AsciiRenderer {
 
         Ok(Self {
             program, vao, atlas_tex, data_tex, color_tex, uniforms, m,
-            cols: 0, rows: 0, scratch: Vec::new(),
+            cols: 0, rows: 0, scratch: Vec::new(), edge_glyphs,
         })
     }
 
@@ -336,6 +401,12 @@ impl AsciiRenderer {
         gl.uniform_1_f32(self.u("u_gameFlip"), game_flip);
         gl.uniform_1_f32(self.u("u_bgEnabled"), bg_enabled);
         gl.uniform_1_f32(self.u("u_bgOpacity"), params.bg_opacity);
+
+        // Edge mode (viz_mode == 1): glyph/brightness computed in-shader from the game tex.
+        gl.uniform_1_i32(self.u("u_mode"), params.viz_mode as i32);
+        gl.uniform_1_f32(self.u("u_edgeThreshold"), params.edge_threshold);
+        gl.uniform_1_f32(self.u("u_edgeGain"), params.edge_gain + params.edge_beat_current);
+        gl.uniform_1_f32(self.u("u_gamePresent"), if game_tex.is_some() { 1.0 } else { 0.0 });
 
         gl.disable(glow::DEPTH_TEST);
         gl.disable(glow::SCISSOR_TEST);

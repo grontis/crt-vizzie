@@ -13,9 +13,9 @@ use std::time::Instant;
 
 use crate::audio_dev::Bands;
 use crate::config::{Params, PHOSPHOR_ORDER};
-// HW_KNOB_ALPHA_MIN/MAX are only consumed inside the Linux-gated GpioHardwareInput::poll.
-#[cfg(target_os = "linux")]
-use crate::config::{HW_KNOB_ALPHA_MAX, HW_KNOB_ALPHA_MIN};
+// HW_KNOB_ALPHA_MIN/MAX are referenced by full path below — they're only consumed inside the
+// Linux-gated GpioHardwareInput::poll, so importing them here would read as unused on non-Linux
+// targets (and trips rust-analyzer's unused-import diagnostic).
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -502,7 +502,10 @@ impl HardwareInput for GpioHardwareInput {
         }
         let hw_dbg = self.dbg_check;
 
-        let alpha = params.hw_knob_alpha.clamp(HW_KNOB_ALPHA_MIN, HW_KNOB_ALPHA_MAX);
+        let alpha = params.hw_knob_alpha.clamp(
+            crate::config::HW_KNOB_ALPHA_MIN,
+            crate::config::HW_KNOB_ALPHA_MAX,
+        );
 
         // ── 1. SPI knob reads ──────────────────────────────────────────────────
         // Read each unique mapped MCP3008 channel once via SPI, then delegate to

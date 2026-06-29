@@ -116,6 +116,26 @@ the Pi's GLES3 (v3d) near-verbatim.
 
 ---
 
+## Visualization modes (the G key)
+
+`Params::viz_mode` selects what fills the glyph grid; the **G** key cycles it. Both modes share
+the entire CRT post chain (atlas sampling, chromatic aberration, scanline, phosphor) — only the
+*source* of each cell's glyph + brightness differs, via a `u_mode` branch in the one fragment
+shader.
+
+- **0 — Fusion (default).** The figure/rain/wave/glitch engine (`fusion.rs`) fills the data
+  textures, composited *over* the game via screen blend (above).
+- **1 — Edge.** Contour line-art **traced from the game frame and drawn over it**: the shader
+  runs a cell-scale Sobel on `u_gameTex` (sample offsets = `1/gridSize`, so edges match the
+  glyph grid), maps the gradient direction to a stroke glyph (`| / - \`) and the magnitude to
+  brightness, then screen-blends those glyphs over the live game via the same composite as
+  Fusion mode (so you see the game *plus* its glowing outlines; **B** toggles the underlay off
+  for glyphs-on-black). Phosphor monochrome (the **P** key still recolors it), audio-reactive
+  (beats pulse brightness via the `edge_beat_current` envelope in `main.rs`; bass drives the
+  shared chroma aberration). No data textures, no `fusion.update()`, no per-cell upload — and
+  **zero GPU→CPU readback**: the game frame is already a texture in our context. With no game
+  frame bound, `u_gamePresent = 0` → no contours.
+
 ## Audio: cpal → rustfft, faithfully
 
 To match the tuned feel of `bands`/`beat`, reproduce two details of the browser `AnalyserNode`:
