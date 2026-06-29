@@ -78,17 +78,44 @@ uniform float u_edgeGain;        // magnitude to mask scale (incl. beat boost)
 uniform float u_darkThreshold;   // cells darker than this become animation space
 uniform float u_darkLevel;       // max intensity (0..1) of the dark-space animation
 uniform float u_activity;        // audio activity 0..1 (calm-idle: low = quiet/minimal)
+uniform float u_glyphTint;       // 0 = phosphor/CGA color, 1 = game-contrast color
 uniform float u_gamePresent;     // 1.0 when a game frame is bound, else 0.0
 
 in  vec2 v_uv;
 out vec4 fragColor;
 
-// Luma of the game frame at a [0,1] cell-space UV, honoring the same flip + uv-scale
-// as the composite path so edge sampling lines up with what gets drawn.
-float gameLuma(vec2 uv) {
+// Color of the game frame at a [0,1] cell-space UV, honoring the same flip + uv-scale
+// as the composite path so sampling lines up with what gets drawn.
+vec3 gameColor(vec2 uv) {
   float vy = mix(uv.y, 1.0 - uv.y, u_gameFlip);
-  vec3 c = texture(u_gameTex, vec2(uv.x * u_gameUvScale.x, vy * u_gameUvScale.y)).rgb;
-  return dot(c, vec3(0.299, 0.587, 0.114));
+  return texture(u_gameTex, vec2(uv.x * u_gameUvScale.x, vy * u_gameUvScale.y)).rgb;
+}
+float gameLuma(vec2 uv) {
+  return dot(gameColor(uv), vec3(0.299, 0.587, 0.114));
+}
+
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  float e = 1.0e-10;
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+// A vivid color that contrasts the underlying game color: complementary hue, boosted
+// saturation, kept bright so it pops through the screen-blend composite.
+vec3 contrastColor(vec3 g) {
+  vec3 hsv = rgb2hsv(g);
+  hsv.x = fract(hsv.x + 0.5);
+  hsv.y = clamp(hsv.y + 0.3, 0.35, 1.0);
+  hsv.z = mix(0.7, 1.0, hsv.z);
+  return hsv2rgb(hsv);
 }
 
 float sampleGlyph(int charIdx, vec2 fragInCell, float dxPixels) {
@@ -147,9 +174,10 @@ void main() {
   float mag  = length(vec2(gx, gy));
   float edge = clamp((mag - u_edgeThreshold) * u_edgeGain, 0.0, 1.0);
   // Dark/negative space is also animation space: the darker the cell, the more the
-  // animation fills it. Use the cell-center luma (cm), not the gradient. smoothstep gives a
-  // gentle ramp from the threshold down to black; u_darkLevel caps the strength.
-  float cm   = gameLuma(cuv);
+  // animation fills it. Use the cell-center color (reused below for glyph tinting); its luma
+  // (cm) drives the dark mask. smoothstep gives a gentle ramp from the threshold down to black.
+  vec3  cellGame = gameColor(cuv);
+  float cm   = dot(cellGame, vec3(0.299, 0.587, 0.114));
   // Calm-idle: the dark/negative-space fill recedes toward a low floor when there's little audio
   // activity, so silence shows minimal characters (the edge outline still reads).
   float idle = 0.15 + 0.85 * clamp(u_activity, 0.0, 1.0);
@@ -172,6 +200,12 @@ void main() {
     baseColor = u_cgaColors[cgaIdx] * max(0.3, bright);
   } else {
     baseColor = phosphorColor(bright);
+  }
+  // Optionally tint the glyph toward a color that contrasts the game underneath it, scaled by
+  // the cell brightness so dim cells stay dim. u_glyphTint = 0 keeps the phosphor/CGA color.
+  if (u_glyphTint > 0.0 && u_gamePresent > 0.5) {
+    vec3 tinted = contrastColor(cellGame) * bright;
+    baseColor = mix(baseColor, tinted, u_glyphTint);
   }
   vec3 color = vec3(baseColor.r * alphaR, baseColor.g * alphaG, baseColor.b * alphaB);
 
@@ -254,7 +288,7 @@ impl AsciiRenderer {
             "u_phosphorBright", "u_chromaOffset", "u_scanline", "u_scanlineMode", "u_cgaColors",
             "u_gameTex", "u_gameUvScale", "u_gameFlip", "u_bgEnabled", "u_bgOpacity",
             "u_edgeThreshold", "u_edgeGain", "u_darkThreshold", "u_darkLevel", "u_activity",
-            "u_gamePresent",
+            "u_glyphTint", "u_gamePresent",
         ];
         let mut uniforms = HashMap::new();
         for n in names {
@@ -395,6 +429,7 @@ impl AsciiRenderer {
         gl.uniform_1_f32(self.u("u_darkThreshold"), params.edge_dark_threshold);
         gl.uniform_1_f32(self.u("u_darkLevel"), params.edge_dark_level);
         gl.uniform_1_f32(self.u("u_activity"), activity);
+        gl.uniform_1_f32(self.u("u_glyphTint"), params.glyph_tint);
         gl.uniform_1_f32(self.u("u_gamePresent"), if game_tex.is_some() { 1.0 } else { 0.0 });
 
         gl.disable(glow::DEPTH_TEST);

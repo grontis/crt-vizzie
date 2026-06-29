@@ -7,6 +7,8 @@ pub struct Params {
     pub chroma_beat: f32,           // extra px on beat (added to chromaBase * beatIntensity)
     pub bg_enabled: bool,           // B key — composite game vs ASCII-on-black
     pub bg_opacity: f32,            // 0.0–1.0 game opacity before the screen blend
+    /// 0 = phosphor/CGA glyph color; 1 = color glyphs by a contrast of the game underneath them.
+    pub glyph_tint: f32,
 
     // ── Layer enables ────────────────────────────────────────────────────────
     pub fig_enabled: bool,           // figureEnabled
@@ -136,6 +138,7 @@ impl Default for Params {
             chroma_beat: 4.0,
             bg_enabled: true,
             bg_opacity: 0.55,
+            glyph_tint: 1.0,
 
             // Layer enables
             fig_enabled: true,
