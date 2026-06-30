@@ -79,19 +79,19 @@ pub struct Params {
     pub hw_knob_alpha: f32,
 
     // ── Edge-contour mode (native-only) ───────────────────────────────────────
-    /// Minimum Sobel gradient magnitude before a cell lights up. Default: 0.08.
+    /// Minimum Sobel gradient magnitude before a cell lights up. Default: 0.3.
     pub edge_threshold:    f32,
-    /// Gradient magnitude → cell brightness scale. Default: 4.0.
+    /// Gradient magnitude → cell brightness scale. Default: 10.0.
     pub edge_gain:         f32,
-    /// Extra gain added to edge_gain at full beat intensity. Default: 0.5.
+    /// Extra gain added to edge_gain at full beat intensity. Default: 3.0.
     pub edge_beat_boost:   f32,
     /// Per-frame beat envelope added to edge_gain (maintained in main.rs, mirrors
     /// chroma_beat_current). Default: 0.0.
     pub edge_beat_current: f32,
-    /// Cells with game luma below this become animation space ("negative space"). Default: 0.25.
+    /// Cells with game luma below this become animation space ("negative space"). Default: 0.125.
     pub edge_dark_threshold: f32,
     /// Max intensity (0..1) of the dark/negative-space animation. The threshold picks where it
-    /// starts; this scales how strong it gets at full darkness. Default: 0.6.
+    /// starts; this scales how strong it gets at full darkness. Default: 0.19.
     pub edge_dark_level:     f32,
 
     // ── Full-screen glitch FX (native-only post-process) ───────────────────────
@@ -199,12 +199,12 @@ impl Default for Params {
             idle_wave_dim:    0.20,
 
             // Edge mode (native-only)
-            edge_threshold:    0.08,
-            edge_gain:         4.0,
-            edge_beat_boost:   0.5,
+            edge_threshold:    0.3,
+            edge_gain:         10.0,
+            edge_beat_boost:   3.0,
             edge_beat_current: 0.0,
-            edge_dark_threshold: 0.25,
-            edge_dark_level:     0.6,
+            edge_dark_threshold: 0.125,
+            edge_dark_level:     0.19,
 
             // Full-screen glitch FX (intensity/chance/decay are derived from the master each tick)
             glitch_fx_master:    0.05,
