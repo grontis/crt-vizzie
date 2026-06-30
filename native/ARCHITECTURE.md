@@ -216,15 +216,31 @@ font/size needs to change at runtime.
 
 ---
 
+## mupen64plus-next on Pi 5 — core configuration
+
+On the Raspberry Pi 5 (Cortex-A76, GLES3 via Mesa/V3D), mupen64plus-next is built with
+`platform=rpi5_64_mesa FORCE_GLES3=1` to get the correct CPU tuning (`-mcpu=cortex-a76`) and
+Mesa GLES3 instead of the legacy VideoCore path. The resulting `.so` lives in `native/cores/`.
+
+The `get_variable()` override in `frontend.rs` forces three options that differ from the defaults:
+
+| Variable | Value | Reason |
+|---|---|---|
+| `mupen64plus-cpucore` | `dynamic_recompiler` | Aarch64 JIT — the default varies by build |
+| `mupen64plus-rdp-plugin` | `angrylion` | GLideN64's `TextureCache::_addTexture` heap-corrupts on GLES3/Mesa; angrylion delivers CPU frames instead |
+| `mupen64plus-rsp-plugin` | `cxd4` | paraLLEl-RSP's JIT `commit_execute` (`mprotect(PROT_EXEC)`) fails on Debian Trixie; cxd4 is a pure interpreter |
+
+The combination is: aarch64 dynarec CPU + cxd4 software RSP + Angrylion software RDP. Frames arrive
+via `video_refresh` (software path) as XRGB8888.
+
+GLideN64 is still compiled into the `.so` and would be the default if these overrides were removed.
+The paraLLEl-RSP JIT issue is a Linux security/mprotect interaction that would require either a
+`shm_open`-based dual-map JIT allocator or rebuilding without `HAVE_PARALLEL_RSP`.
+
 ## Known limitations & future work
 
 These are the deferred items and rough edges, kept here (not as inline `TODO`s) so the code
 stays feature-focused.
-
-**Pi (GLES3) portability of the software-frame path.** `upload_sw_texture` in `main.rs` uploads
-CPU frames with the `glow::BGRA` client format, which is desktop-GL-only. On the Pi's GLES3 this
-path must upload `RGBA` and swap R↔B via texture swizzle (`TEXTURE_SWIZZLE_R/B`) under
-`cfg(not(windows))`. The hardware-FBO path (GLideN64) is unaffected.
 
 **FBO depth/stencil.** `build_game_fbo` attaches only `DEPTH24`, matching the cores tested so far
 (`stencil=false`). A core that requests `hw.stencil=true` (GLideN64 can, for some N64 framebuffer

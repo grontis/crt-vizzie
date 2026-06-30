@@ -18,6 +18,15 @@ mod ui;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+// Maximum render resolution. Above this the Pi's GPU throughput drops noticeably; the PostFx
+// blit upscales to fill the display so fullscreen still looks correct at any monitor resolution.
+const MAX_RENDER_W: u32 = 1280;
+const MAX_RENDER_H: u32 = 720;
+
+fn render_dims(win_w: u32, win_h: u32) -> (u32, u32) {
+    (win_w.min(MAX_RENDER_W), win_h.min(MAX_RENDER_H))
+}
+
 struct Args {
     core: Option<PathBuf>,
     rom: Option<PathBuf>,
@@ -236,7 +245,8 @@ fn run_window(
     };
     {
         let (iw, ih) = gfx.window.size();
-        unsafe { ascii.resize(&gfx.gl, iw, ih) };
+        let (rw, rh) = render_dims(iw, ih);
+        unsafe { ascii.resize(&gfx.gl, rw, rh) };
     }
 
     // Debug overlay: draggable sliders for live param tuning (Windows dev tool; U toggles it).
@@ -259,7 +269,8 @@ fn run_window(
     };
     {
         let (iw, ih) = gfx.window.size();
-        unsafe { post.resize(&gfx.gl, iw, ih) };
+        let (rw, rh) = render_dims(iw, ih);
+        unsafe { post.resize(&gfx.gl, rw, rh) };
     }
     // RNG + wall clock driving the momentary glitch bursts.
     let mut glitch_rng = rng::Xorshift32::new(0x51A5_F00D);
@@ -341,11 +352,12 @@ fn run_window(
                     }
                 }
                 Event::Window { win_event: sdl2::event::WindowEvent::Resized(w, h), .. } => {
-                    unsafe { ascii.resize(&gfx.gl, w as u32, h as u32) };
-                    unsafe { post.resize(&gfx.gl, w as u32, h as u32) };
+                    let (rw, rh) = render_dims(w as u32, h as u32);
+                    unsafe { ascii.resize(&gfx.gl, rw, rh) };
+                    unsafe { post.resize(&gfx.gl, rw, rh) };
                     fusion.reset(ascii.cols(), ascii.rows());
-                    eprintln!("[renderer] resize {}x{} → grid {}x{}",
-                        w, h, ascii.cols(), ascii.rows());
+                    eprintln!("[renderer] resize {}x{} → render {}x{} grid {}x{}",
+                        w, h, rw, rh, ascii.cols(), ascii.rows());
                 }
                 _ => {}
             }
@@ -452,12 +464,15 @@ fn run_window(
             (None, 1.0, 1.0, 0.0_f32) // no core / no frame yet → ASCII on black
         };
 
+        let (rend_w, rend_h) = render_dims(win_w, win_h);
         unsafe {
             // Pass 1: render the scene (game + ASCII animation) into the offscreen FBO.
-            post.bind_scene(&gfx.gl, win_w, win_h);
+            // Capped at MAX_RENDER_W × MAX_RENDER_H so fullscreen at a high-res display
+            // doesn't quadruple GPU load — the PostFx blit upscales to fill win_w × win_h.
+            post.bind_scene(&gfx.gl, rend_w, rend_h);
             ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
-            ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, win_w, win_h, activity);
-            // Pass 2: full-screen glitch/warp post-process → default framebuffer.
+            ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, rend_w, rend_h, activity);
+            // Pass 2: full-screen glitch/warp post-process → default framebuffer (display size).
             post.render(&gfx.gl, &params, start_time.elapsed().as_secs_f32(), win_w, win_h);
             // UI overlay on top (drawn after the glitch so it stays readable).
             ui.render(&gfx.gl, &params, win_w, win_h);
@@ -488,25 +503,46 @@ unsafe fn upload_sw_texture(
     buf: &[u8],
 ) {
     use glow::HasContext;
-    // The BGRA client format below is desktop-GL only (Windows). The Pi's GLES3 path needs RGBA
-    // + an R/B texture swizzle instead — see ARCHITECTURE.md ("Known limitations & future work").
     gl.bind_texture(glow::TEXTURE_2D, Some(tex));
     match fmt {
-        // XRGB8888: native u32 0xFFRRGGBB → little-endian bytes B,G,R,X → BGRA8.
-        1 => gl.tex_image_2d(
-            glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w, h, 0,
-            glow::BGRA, glow::UNSIGNED_BYTE, Some(buf),
-        ),
-        // RGB565.
+        // XRGB8888: little-endian bytes in memory are [B, G, R, X].
+        1 => {
+            #[cfg(target_os = "windows")]
+            gl.tex_image_2d(
+                glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w, h, 0,
+                glow::BGRA, glow::UNSIGNED_BYTE, Some(buf),
+            );
+            #[cfg(not(target_os = "windows"))]
+            {
+                // GLES3 has no GL_BGRA client format. Upload as RGBA (GL sees the bytes as
+                // R=B_val, G=G_val, B=R_val) and use texture swizzle to swap R↔B.
+                gl.tex_image_2d(
+                    glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w, h, 0,
+                    glow::RGBA, glow::UNSIGNED_BYTE, Some(buf),
+                );
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_SWIZZLE_R, glow::BLUE as i32);
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_SWIZZLE_B, glow::RED as i32);
+            }
+        }
+        // RGB565 — supported natively in both desktop GL and GLES3.
         2 => gl.tex_image_2d(
             glow::TEXTURE_2D, 0, glow::RGB as i32, w, h, 0,
             glow::RGB, glow::UNSIGNED_SHORT_5_6_5, Some(buf),
         ),
-        // 0RGB1555 (best-effort).
-        _ => gl.tex_image_2d(
-            glow::TEXTURE_2D, 0, glow::RGB5_A1 as i32, w, h, 0,
-            glow::BGRA, glow::UNSIGNED_SHORT_1_5_5_5_REV, Some(buf),
-        ),
+        // 0RGB1555: desktop GL uses BGRA+UNSIGNED_SHORT_1_5_5_5_REV.
+        // GLES3 lacks that combo; upload as RGB5_A1 which accepts the same 5-5-5-1 bit layout.
+        _ => {
+            #[cfg(target_os = "windows")]
+            gl.tex_image_2d(
+                glow::TEXTURE_2D, 0, glow::RGB5_A1 as i32, w, h, 0,
+                glow::BGRA, glow::UNSIGNED_SHORT_1_5_5_5_REV, Some(buf),
+            );
+            #[cfg(not(target_os = "windows"))]
+            gl.tex_image_2d(
+                glow::TEXTURE_2D, 0, glow::RGB5_A1 as i32, w, h, 0,
+                glow::RGBA, glow::UNSIGNED_SHORT_5_5_5_1, Some(buf),
+            );
+        }
     }
 }
 

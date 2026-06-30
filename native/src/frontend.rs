@@ -143,6 +143,19 @@ pub unsafe fn context_reset() {
     }
 }
 
+/// Invoke the core's captured context_destroy so it tears down its GL resources.
+/// Call before destroying or resizing GL resources; follow with `set_fbo` + `context_reset`.
+///
+/// # Safety
+/// Must be called from the same thread as the GL context.
+pub unsafe fn context_destroy() {
+    let p = CONTEXT_DESTROY.load(Ordering::Acquire);
+    if p != 0 {
+        let f: unsafe extern "C" fn() = std::mem::transmute(p);
+        f();
+    }
+}
+
 // ─── Environment callback ─────────────────────────────────────────────────────
 
 unsafe extern "C" fn env_callback(cmd: c_uint, data: *mut c_void) -> bool {
@@ -289,6 +302,10 @@ unsafe extern "C" fn audio_sample_batch(_data: *const i16, frames: usize) -> usi
 }
 
 const FB_EMULATION_OFF: &[u8] = b"False\0";
+const CPU_DYNAREC: &[u8] = b"dynamic_recompiler\0";
+const RDP_ANGRYLION: &[u8] = b"angrylion\0";
+const RSP_HLE: &[u8] = b"hle\0";
+const THREADED_RENDERER_OFF: &[u8] = b"False\0";
 
 /// Override specific core options; return false for everything else (core uses its default).
 unsafe fn get_variable(data: *mut c_void) -> bool {
@@ -300,10 +317,26 @@ unsafe fn get_variable(data: *mut c_void) -> bool {
         return false;
     }
     let key = std::ffi::CStr::from_ptr(var.key).to_string_lossy();
-    // GLideN64 framebuffer emulation is the buggy path (heap corruption / glitches; broken on the
-    // Pi GL driver too). Not needed for a visual-only background — force it off.
-    if key == "mupen64plus-EnableFBEmulation" {
-        var.value = FB_EMULATION_OFF.as_ptr() as *const c_char;
+    // Force the aarch64 dynamic recompiler — the core's built-in default may not pick it.
+    if key == "mupen64plus-cpucore" {
+        var.value = CPU_DYNAREC.as_ptr() as *const c_char;
+        return true;
+    }
+    // Use Angrylion software RDP instead of GLideN64 — GLideN64's TextureCache has a
+    // heap-corruption bug (free() on invalid pointer) in the GLES3/Mesa path on Pi 5.
+    // Angrylion delivers CPU-rendered frames via video_refresh, matching parallel_n64's path.
+    if key == "mupen64plus-rdp-plugin" {
+        var.value = RDP_ANGRYLION.as_ptr() as *const c_char;
+        return true;
+    }
+    // Use cxd4 software RSP interpreter — paraLLEl-RSP JIT fails mprotect(PROT_EXEC) on Pi 5.
+    if key == "mupen64plus-rsp-plugin" || key == "mupen64plus-rspplugin" {
+        var.value = b"cxd4\0".as_ptr() as *const c_char;
+        return true;
+    }
+    // Disable threaded renderer — we don't need it for the software path.
+    if key == "mupen64plus-ThreadedRenderer" {
+        var.value = THREADED_RENDERER_OFF.as_ptr() as *const c_char;
         return true;
     }
     false

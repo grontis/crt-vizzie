@@ -317,7 +317,7 @@ use std::sync::{
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 #[cfg(target_os = "linux")]
-use rppal::gpio::{Gpio, InputPin, Level, OutputPin, Trigger};
+use rppal::gpio::{Gpio, InputPin, OutputPin, Trigger};
 #[cfg(target_os = "linux")]
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 
@@ -401,7 +401,7 @@ impl GpioHardwareInput {
         let mut button_pins: Vec<InputPin> = Vec::with_capacity(BUTTONS.len());
         for entry in BUTTONS.iter() {
             let mut pin = gpio.get(entry.gpio)?.into_input_pullup();
-            pin.set_interrupt(Trigger::Both)?;
+            pin.set_interrupt(Trigger::Both, None)?;
             button_pins.push(pin);
         }
         eprintln!("[hw] {} button inputs initialized (GPIO {:?})",
@@ -425,13 +425,14 @@ impl GpioHardwareInput {
                 while !stop_thread.load(Ordering::Relaxed) {
                     for (idx, pin) in pins.iter_mut().enumerate() {
                         match pin.poll_interrupt(false, Some(Duration::from_millis(5))) {
-                            Ok(Some(level)) => {
-                                let pressed = level == Level::Low; // pull-up: Low = pressed
+                            Ok(Some(event)) => {
+                                // pull-up: FallingEdge = pin went Low = button pressed
+                                let pressed = event.trigger == Trigger::FallingEdge;
                                 if tx.send((idx, pressed)).is_err() {
                                     return; // receiver dropped — GpioHardwareInput was dropped
                                 }
                                 if std::env::var("CRT_HW_DEBUG").is_ok() {
-                                    eprintln!("[hwdbg] button {} {:?}", idx, level);
+                                    eprintln!("[hwdbg] button {} trigger={:?}", idx, event.trigger);
                                 }
                             }
                             Ok(None) => {} // timeout — check next pin
