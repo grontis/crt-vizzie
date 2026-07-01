@@ -143,6 +143,25 @@ impl PostFx {
         gl.clear(glow::COLOR_BUFFER_BIT);
     }
 
+    /// Upscale-blit the scene texture straight to the default framebuffer, skipping the glitch
+    /// shader. Used when no burst is active — the glitch shader is a per-pixel no-op then (it still
+    /// runs its hashing + trig + 3-tap at display resolution), so a driver blit is strictly cheaper
+    /// while preserving the capped-render → display upscale. Leaves the default framebuffer bound at
+    /// the display-size viewport, matching the state `render` leaves for the UI overlay.
+    /// `sw`×`sh` = capped scene size; `dw`×`dh` = display size.
+    /// # Safety: a current GL context.
+    pub unsafe fn blit_scene(&self, gl: &glow::Context, sw: u32, sh: u32, dw: u32, dh: u32) {
+        gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(self.fbo));
+        gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
+        gl.blit_framebuffer(
+            0, 0, sw as i32, sh as i32,
+            0, 0, dw as i32, dh as i32,
+            glow::COLOR_BUFFER_BIT, glow::LINEAR,
+        );
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        gl.viewport(0, 0, dw as i32, dh as i32);
+    }
+
     /// Sample the scene texture with the glitch distortion → default framebuffer.
     /// # Safety: a current GL context.
     pub unsafe fn render(&self, gl: &glow::Context, params: &crate::config::Params, time: f32, w: u32, h: u32) {

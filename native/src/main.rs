@@ -24,6 +24,11 @@ use std::process::ExitCode;
 const MAX_RENDER_W: u32 = 1280;
 const MAX_RENDER_H: u32 = 720;
 
+// Below this burst-envelope level the glitch post-shader's distortion is sub-pixel (its
+// displacements scale with the envelope), so the scene is upscale-blitted directly instead of
+// running the shader. The envelope decays multiplicatively toward zero, so it rarely hits 0.0.
+const GLITCH_ACTIVE_EPS: f32 = 1e-3;
+
 fn render_dims(win_w: u32, win_h: u32) -> (u32, u32) {
     (win_w.min(MAX_RENDER_W), win_h.min(MAX_RENDER_H))
 }
@@ -484,8 +489,14 @@ fn run_window(
             post.bind_scene(&gfx.gl, rend_w, rend_h);
             ascii.upload(&gfx.gl, &fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
             ascii.render(&gfx.gl, &params, game_tex, game_sx, game_sy, game_flip, rend_w, rend_h, activity);
-            // Pass 2: full-screen glitch/warp post-process → default framebuffer (display size).
-            post.render(&gfx.gl, &params, start_time.elapsed().as_secs_f32(), win_w, win_h);
+            // Pass 2: composite → display (upscales the capped render to fill the window). Only
+            // run the full glitch/warp shader while a burst is active; otherwise it's a costly
+            // per-pixel no-op, so blit the scene straight through instead.
+            if params.glitch_fx_env > GLITCH_ACTIVE_EPS {
+                post.render(&gfx.gl, &params, start_time.elapsed().as_secs_f32(), win_w, win_h);
+            } else {
+                post.blit_scene(&gfx.gl, rend_w, rend_h, win_w, win_h);
+            }
             // UI overlay on top (drawn after the glitch so it stays readable).
             ui.render(&gfx.gl, &params, win_w, win_h);
         }
