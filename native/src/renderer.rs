@@ -50,6 +50,7 @@ const FRAG_BODY: &str = r#"
 uniform sampler2D  u_glyphAtlas;
 uniform usampler2D u_cellData;
 uniform sampler2D  u_cellColor;
+uniform sampler2D  u_maskTex;    // per-cell game mask: rgb = cell-center color, a = Sobel magnitude
 
 uniform vec2  u_resolution;
 uniform vec2  u_cellSize;
@@ -83,16 +84,6 @@ uniform float u_gamePresent;     // 1.0 when a game frame is bound, else 0.0
 
 in  vec2 v_uv;
 out vec4 fragColor;
-
-// Color of the game frame at a [0,1] cell-space UV, honoring the same flip + uv-scale
-// as the composite path so sampling lines up with what gets drawn.
-vec3 gameColor(vec2 uv) {
-  float vy = mix(uv.y, 1.0 - uv.y, u_gameFlip);
-  return texture(u_gameTex, vec2(uv.x * u_gameUvScale.x, vy * u_gameUvScale.y)).rgb;
-}
-float gameLuma(vec2 uv) {
-  return dot(gameColor(uv), vec3(0.299, 0.587, 0.114));
-}
 
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -156,27 +147,16 @@ void main() {
   float bright  = float(data.g) / 65535.0;
   int   cgaIdx  = int(texelFetch(u_cellColor, cellPos, 0).r * 255.0 + 0.5);
 
-  // Cell-scale Sobel (offsets span one cell in game-UV space, so the mask matches the
-  // glyph grid, not per-texel noise).
-  vec2 g   = vec2(u_gridSize);
-  vec2 cuv = (vec2(cellPos) + 0.5) / g;
-  vec2 o   = 1.0 / g;
-  float tl = gameLuma(cuv + vec2(-o.x, -o.y));
-  float tm = gameLuma(cuv + vec2( 0.0, -o.y));
-  float tr = gameLuma(cuv + vec2( o.x, -o.y));
-  float ml = gameLuma(cuv + vec2(-o.x,  0.0));
-  float mr = gameLuma(cuv + vec2( o.x,  0.0));
-  float bl = gameLuma(cuv + vec2(-o.x,  o.y));
-  float bm = gameLuma(cuv + vec2( 0.0,  o.y));
-  float br = gameLuma(cuv + vec2( o.x,  o.y));
-  float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
-  float gy = (bl + 2.0 * bm + br) - (tl + 2.0 * tm + tr);
-  float mag  = length(vec2(gx, gy));
+  // Per-cell game mask, precomputed once per cell in the mask pre-pass (the renderer's mask
+  // program): .rgb = cell-center game color, .a = cell-scale Sobel magnitude. This replaces a
+  // 9-tap Sobel that would otherwise run identically for every fragment inside the same cell.
+  vec4  maskCell = texelFetch(u_maskTex, cellPos, 0);
+  vec3  cellGame = maskCell.rgb;
+  float mag      = maskCell.a;
   float edge = clamp((mag - u_edgeThreshold) * u_edgeGain, 0.0, 1.0);
-  // Dark/negative space is also animation space: the darker the cell, the more the
-  // animation fills it. Use the cell-center color (reused below for glyph tinting); its luma
-  // (cm) drives the dark mask. smoothstep gives a gentle ramp from the threshold down to black.
-  vec3  cellGame = gameColor(cuv);
+  // Dark/negative space is also animation space: the darker the cell, the more the animation
+  // fills it. cm is the cell-center luma (from the mask's rgb); smoothstep gives a gentle ramp
+  // from the threshold down to black.
   float cm   = dot(cellGame, vec3(0.299, 0.587, 0.114));
   // Calm-idle: the dark/negative-space fill recedes toward a low floor when there's little audio
   // activity, so silence shows minimal characters (the edge outline still reads).
@@ -238,6 +218,51 @@ void main() {
 }
 "#;
 
+// Mask pre-pass: renders one texel per glyph cell (viewport == grid size). Each texel computes
+// the cell-scale Sobel edge magnitude + the cell-center game color once, so the composite pass
+// reads it with a single texelFetch instead of re-running the 9-tap Sobel per fragment. Reuses
+// VERT_BODY (same full-screen triangle). Output: rgb = cell color, a = min(Sobel magnitude, 1).
+const MASK_FRAG_BODY: &str = r#"
+uniform sampler2D u_gameTex;
+uniform vec2  u_gameUvScale;
+uniform float u_gameFlip;
+uniform ivec2 u_gridSize;
+
+out vec4 fragColor;
+
+// Color of the game frame at a [0,1] cell-space UV, honoring the same flip + uv-scale as the
+// composite path so the mask lines up with what the composite draws.
+vec3 gameColor(vec2 uv) {
+  float vy = mix(uv.y, 1.0 - uv.y, u_gameFlip);
+  return texture(u_gameTex, vec2(uv.x * u_gameUvScale.x, vy * u_gameUvScale.y)).rgb;
+}
+float gameLuma(vec2 uv) {
+  return dot(gameColor(uv), vec3(0.299, 0.587, 0.114));
+}
+
+void main() {
+  // gl_FragCoord.xy = cellPos + 0.5, so cuv == (cellPos + 0.5)/grid — identical to the cuv the
+  // composite pass would compute for this cell. texel row r maps to composite cellPos.y == r.
+  vec2 g   = vec2(u_gridSize);
+  vec2 cuv = gl_FragCoord.xy / g;
+  vec2 o   = 1.0 / g;
+  float tl = gameLuma(cuv + vec2(-o.x, -o.y));
+  float tm = gameLuma(cuv + vec2( 0.0, -o.y));
+  float tr = gameLuma(cuv + vec2( o.x, -o.y));
+  float ml = gameLuma(cuv + vec2(-o.x,  0.0));
+  float mr = gameLuma(cuv + vec2( o.x,  0.0));
+  float bl = gameLuma(cuv + vec2(-o.x,  o.y));
+  float bm = gameLuma(cuv + vec2( 0.0,  o.y));
+  float br = gameLuma(cuv + vec2( o.x,  o.y));
+  float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+  float gy = (bl + 2.0 * bm + br) - (tl + 2.0 * tm + tr);
+  float mag = length(vec2(gx, gy));
+  // Store min(mag, 1.0) in 8-bit alpha: the composite's edge = clamp((mag - thr)*gain, 0, 1)
+  // already saturates well below mag == 1 at the default threshold/gain, so nothing is lost.
+  fragColor = vec4(gameColor(cuv), min(mag, 1.0));
+}
+"#;
+
 pub struct AsciiRenderer {
     program: glow::NativeProgram,
     vao: glow::NativeVertexArray,
@@ -245,6 +270,10 @@ pub struct AsciiRenderer {
     data_tex: glow::NativeTexture,  // RG16UI (charIdx, bright16)
     color_tex: glow::NativeTexture, // R8 normalized (CGA index)
     uniforms: HashMap<&'static str, glow::NativeUniformLocation>,
+    mask_program: glow::NativeProgram,
+    mask_fbo: glow::NativeFramebuffer,
+    mask_tex: glow::NativeTexture, // RGBA8 (cell color rgb, Sobel magnitude a), one texel per cell
+    mask_uniforms: HashMap<&'static str, glow::NativeUniformLocation>,
     m: AtlasMetrics,
     cols: usize,
     rows: usize,
@@ -283,7 +312,7 @@ impl AsciiRenderer {
         let program = link(gl, &vert, &frag)?;
 
         let names = [
-            "u_glyphAtlas", "u_cellData", "u_cellColor", "u_resolution", "u_cellSize", "u_gridSize",
+            "u_glyphAtlas", "u_cellData", "u_cellColor", "u_maskTex", "u_resolution", "u_cellSize", "u_gridSize",
             "u_atlasTileSize", "u_atlasDims", "u_atlasTexSize", "u_phosphorDim", "u_phosphorMid",
             "u_phosphorBright", "u_chromaOffset", "u_scanline", "u_scanlineMode", "u_cgaColors",
             "u_gameTex", "u_gameUvScale", "u_gameFlip", "u_bgEnabled", "u_bgOpacity",
@@ -310,13 +339,33 @@ impl AsciiRenderer {
 
         let vao = gl.create_vertex_array()?;
 
+        // ── Mask pre-pass: program + per-cell RGBA8 texture + its FBO ──
+        let mask_program = link(gl, &vert, &format!("{SHADER_HEADER}{MASK_FRAG_BODY}"))?;
+        let mut mask_uniforms = HashMap::new();
+        for n in ["u_gameTex", "u_gameUvScale", "u_gameFlip", "u_gridSize"] {
+            if let Some(loc) = gl.get_uniform_location(mask_program, n) {
+                mask_uniforms.insert(n, loc);
+            }
+        }
+        let mask_tex = make_data_tex(gl)?; // NEAREST — sampled via texelFetch at cell resolution
+        gl.bind_texture(glow::TEXTURE_2D, Some(mask_tex));
+        gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0,
+            glow::RGBA, glow::UNSIGNED_BYTE, None);
+        let mask_fbo = gl.create_framebuffer()?;
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(mask_fbo));
+        gl.framebuffer_texture_2d(
+            glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(mask_tex), 0,
+        );
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+
         println!(
             "[renderer] atlas loaded: {}x{} tiles, cell {}x{}, texture {}x{}",
             m.atlas_cols, m.atlas_rows, m.cell_w, m.cell_h, aw, ah
         );
 
         Ok(Self {
-            program, vao, atlas_tex, data_tex, color_tex, uniforms, m,
+            program, vao, atlas_tex, data_tex, color_tex, uniforms,
+            mask_program, mask_fbo, mask_tex, mask_uniforms, m,
             cols: 0, rows: 0, scratch: Vec::new(),
         })
     }
@@ -344,6 +393,10 @@ impl AsciiRenderer {
         gl.bind_texture(glow::TEXTURE_2D, Some(self.color_tex));
         gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::R8 as i32, self.cols as i32, self.rows as i32,
             0, glow::RED, glow::UNSIGNED_BYTE, None);
+        // Mask texture is one texel per cell — same grid dimensions as the data textures.
+        gl.bind_texture(glow::TEXTURE_2D, Some(self.mask_tex));
+        gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, self.cols as i32, self.rows as i32,
+            0, glow::RGBA, glow::UNSIGNED_BYTE, None);
 
         println!("[renderer] grid {}x{} ({} cells)", self.cols, self.rows, n);
     }
@@ -367,6 +420,39 @@ impl AsciiRenderer {
         gl.bind_texture(glow::TEXTURE_2D, Some(self.color_tex));
         gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::R8 as i32, self.cols as i32, self.rows as i32,
             0, glow::RED, glow::UNSIGNED_BYTE, Some(cga_idx));
+    }
+
+    /// Mask pre-pass: compute the per-cell game edge/dark mask + cell color into `mask_tex`
+    /// (one texel per cell), so `render`'s composite shader reads it with a single texelFetch
+    /// instead of re-running the 9-tap Sobel per fragment. Only meaningful when a game frame is
+    /// bound; callers skip it otherwise. Must run before `render` (which rebinds the scene FBO).
+    /// # Safety: a current GL context must exist.
+    pub unsafe fn render_mask(
+        &self,
+        gl: &glow::Context,
+        game_tex: glow::NativeTexture,
+        game_sx: f32,
+        game_sy: f32,
+        game_flip: f32,
+    ) {
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.mask_fbo));
+        gl.viewport(0, 0, self.cols as i32, self.rows as i32);
+        gl.use_program(Some(self.mask_program));
+
+        gl.active_texture(glow::TEXTURE0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(game_tex));
+        gl.uniform_1_i32(self.mask_uniforms.get("u_gameTex"), 0);
+        gl.uniform_2_f32(self.mask_uniforms.get("u_gameUvScale"), game_sx, game_sy);
+        gl.uniform_1_f32(self.mask_uniforms.get("u_gameFlip"), game_flip);
+        gl.uniform_2_i32(self.mask_uniforms.get("u_gridSize"), self.cols as i32, self.rows as i32);
+
+        gl.disable(glow::DEPTH_TEST);
+        gl.disable(glow::SCISSOR_TEST);
+        gl.disable(glow::BLEND);
+        gl.bind_vertex_array(Some(self.vao));
+        gl.draw_arrays(glow::TRIANGLES, 0, 3);
+        gl.bind_vertex_array(None);
+        gl.use_program(None);
     }
 
     /// Set uniforms, bind textures, single draw. `game_tex=None` → ASCII on black.
@@ -401,6 +487,12 @@ impl AsciiRenderer {
         gl.active_texture(glow::TEXTURE3);
         gl.bind_texture(glow::TEXTURE_2D, Some(game_tex.unwrap_or(self.atlas_tex)));
         gl.uniform_1_i32(self.u("u_gameTex"), 3);
+
+        // Per-cell game mask from render_mask(). When there's no game frame the mask is stale,
+        // but u_gamePresent (0.0) zeroes its contribution, so its contents don't matter.
+        gl.active_texture(glow::TEXTURE4);
+        gl.bind_texture(glow::TEXTURE_2D, Some(self.mask_tex));
+        gl.uniform_1_i32(self.u("u_maskTex"), 4);
 
         gl.uniform_2_f32(self.u("u_resolution"), win_w as f32, win_h as f32);
         gl.uniform_2_f32(self.u("u_cellSize"), self.m.cell_w, self.m.cell_h);

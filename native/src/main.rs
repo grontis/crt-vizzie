@@ -473,6 +473,11 @@ fn run_window(
 
         let (rend_w, rend_h) = render_dims(win_w, win_h);
         unsafe {
+            // Pre-pass: compute the per-cell game edge/dark mask once per cell (skipped when
+            // there's no game frame — the composite zeroes its contribution via u_gamePresent).
+            if let Some(gt) = game_tex {
+                ascii.render_mask(&gfx.gl, gt, game_sx, game_sy, game_flip);
+            }
             // Pass 1: render the scene (game + ASCII animation) into the offscreen FBO.
             // Capped at MAX_RENDER_W × MAX_RENDER_H so fullscreen at a high-res display
             // doesn't quadruple GPU load — the PostFx blit upscales to fill win_w × win_h.
