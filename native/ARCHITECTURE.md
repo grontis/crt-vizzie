@@ -56,6 +56,7 @@ is the only consumer of game-frame luma) is off by default and deferred.
 | `post.rs` | offscreen scene FBO + full-screen glitch/warp post-process pass | new |
 | `ui.rs` | debug slider overlay for live param tuning (dev tool) | `bg-fx-panel.js` |
 | `hw_input.rs` | MCP3008 SPI knobs + GPIO buttons/LEDs (Pi); no-op stub elsewhere | `hardware-bridge.js` |
+| `input.rs` | SDL2 raw joystick → lock-free table → libretro `input_state` (game controls) | new |
 | `config.rs` | consts + `Params` struct | `config.js` |
 | `ascii_art.rs` | static figure data | `ascii-art.js` |
 
@@ -189,6 +190,45 @@ Repurpose both (e.g. cycle phosphor / toggle scanline) — one-line changes in `
 
 ---
 
+## Controller input: raw joystick, not SDL GameController
+
+The core polls input each frame through the frontend's `input_state` callback. `input.rs` answers
+it from a lock-free table: the main thread reads SDL once per frame (`Gamepads::poll`) and publishes
+into per-port atomics; the core's emu thread reads them back. Buttons are reported as a **RetroPad**
+and mupen64plus-next applies its own RetroPad→N64 mapping on top.
+
+We read the **raw `Joystick`**, not SDL's `GameController` abstraction. SDL's built-in mapping for
+the low-cost N64 USB pads (`SWITCH CO.,LTD.` / kiwitata, VID:PID `0e6d:111d`) guesses the layout
+wrong — dead Start, unmapped C-buttons, the analog stick on the wrong axes. Binding raw indices
+gives an exact mapping. The indices for that pad are named constants at the top of `input.rs`; to
+support a different pad, capture its indices with `cargo run --example input_probe` and edit them.
+
+Mapping for the reference pad (raw index → N64 function → RetroPad id the core reads):
+
+| N64 | raw | RetroPad |
+|---|---|---|
+| A | btn 2 | **B** (id 0) |
+| B | btn 1 | **Y** (id 1) |
+| Start | btn 12 | START |
+| Z | btn 6 | L2 |
+| L / R | btn 4 / 5 | L / R |
+| C up/down/left/right | btn 9/3/0/8 | right analog stick (the core's default C source) |
+| D-pad | hat 0 | UP/DOWN/LEFT/RIGHT |
+| Analog stick | axes 0/1 | left analog |
+
+mupen64plus-next's RetroPad→N64 map is non-standard: **N64 A ← RetroPad B, N64 B ← RetroPad Y**
+(RetroPad A/X aren't read), C-buttons ← the right analog stick. That's why the physical N64 A/B
+buttons must be reported on RetroPad B/Y, not A/B.
+
+**Hot-plug:** controllers open/close only in `Gamepads::handle_event`, fed every SDL event by the
+main loop. `JoyDeviceAdded` carries a *joystick index* (→ `open`); `JoyDeviceRemoved` carries an
+*instance id* (→ matched against open pads) — distinct despite both being `u32`. SDL emits an ADDED
+event for each already-connected pad on the first pump, so startup and hot-plug share one path.
+Ports are stable (`[Option<Joystick>; 4]` indexed by port): another pad unplugging never shuffles a
+player's port, and a disconnect clears that port's table so a button held at unplug can't latch.
+
+---
+
 ## Glyph atlas: baked, not rasterized
 
 Variable-font axis selection (Orbitron weight 800) is fiddly in Rust. Instead, bake from the
@@ -222,20 +262,33 @@ On the Raspberry Pi 5 (Cortex-A76, GLES3 via Mesa/V3D), mupen64plus-next is buil
 `platform=rpi5_64_mesa FORCE_GLES3=1` to get the correct CPU tuning (`-mcpu=cortex-a76`) and
 Mesa GLES3 instead of the legacy VideoCore path. The resulting `.so` lives in `native/cores/`.
 
-The `get_variable()` override in `frontend.rs` forces three options that differ from the defaults:
+The `get_variable()` override in `frontend.rs` forces these core options (all others fall through
+to the core's own default):
 
 | Variable | Value | Reason |
 |---|---|---|
 | `mupen64plus-cpucore` | `dynamic_recompiler` | Aarch64 JIT — the default varies by build |
-| `mupen64plus-rdp-plugin` | `angrylion` | GLideN64's `TextureCache::_addTexture` heap-corrupts on GLES3/Mesa; angrylion delivers CPU frames instead |
-| `mupen64plus-rsp-plugin` | `cxd4` | paraLLEl-RSP's JIT `commit_execute` (`mprotect(PROT_EXEC)`) fails on Debian Trixie; cxd4 is a pure interpreter |
+| `mupen64plus-ThreadedRenderer` | `False` | Would spawn a renderer thread that contends with our single GL context (FBO publish / `context_reset` run on the main thread) |
+| `mupen64plus-rdp-plugin` | `angrylion` | Software RDP; see the GLideN64 note below |
+| `mupen64plus-rsp-plugin` | `cxd4` | HLE RSP forces a paraLLEl-RSP fallback under Angrylion (core warns); paraLLEl-RSP's JIT `mprotect(PROT_EXEC)` fails on Debian Trixie, so cxd4 (pure interpreter) is the only LLE RSP that works here |
+| `mupen64plus-angrylion-multithread` | `all threads` | Spread the software RDP across all 4 cores (3 idle single-threaded) |
+| `mupen64plus-angrylion-sync` | `Low` | Relax inter-thread sync for speed; the game is a backdrop, so the small accuracy cost is acceptable |
 
-The combination is: aarch64 dynarec CPU + cxd4 software RSP + Angrylion software RDP. Frames arrive
-via `video_refresh` (software path) as XRGB8888.
+The combination is aarch64 dynarec CPU + cxd4 software RSP + multithreaded Angrylion software RDP.
+Frames arrive via `video_refresh` (software path) as XRGB8888 — the GPU does no emulation work.
 
-GLideN64 is still compiled into the `.so` and would be the default if these overrides were removed.
-The paraLLEl-RSP JIT issue is a Linux security/mprotect interaction that would require either a
-`shm_open`-based dual-map JIT allocator or rebuilding without `HAVE_PARALLEL_RSP`.
+**Why not the GPU path (GLideN64).** GLideN64 is the core's own "Performance" RDP and would offload
+rasterization to the V3D GPU via the hw-render FBO (the zero-readback path this frontend was
+designed around), reached with `rdp-plugin=gliden64` + `rsp-plugin=hle`. It was tested and **does
+not work with the current prebuilt core (`2.8-GLES3 98c1b0d`)**: GLideN64 initializes cleanly —
+hw-render context, the 640×480 FBO, HLE RSP, and `plugin_start_gfx` all succeed — but the **first
+display list aborts** in `TextureCache::_addTexture` with `free(): invalid pointer` (confirmed by
+backtrace: `drawTriangles → _updateTextures → TextureCache::update → _addTexture → free`). This is
+a heap-corruption bug in this GLideN64 build on aarch64/GLES3 Mesa, on the very first texture add —
+it is **not** option-tunable (`EnableTextureCache=False` does not prevent it; that flag controls the
+hi-res disk cache, not the in-memory `TextureCache`). Re-enabling GPU rendering — the real unlock
+for playable N64 performance — requires a **newer or rebuilt core**, not a frontend change. The
+`parallel-rdp`/`parallel` Vulkan back-ends are not usable either — V3D exposes GLES, not Vulkan.
 
 ## Known limitations & future work
 

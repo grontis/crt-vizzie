@@ -7,6 +7,7 @@ mod config;
 mod frontend;
 mod fusion;
 mod hw_input;
+mod input;
 mod libretro;
 mod platform;
 mod post;
@@ -317,6 +318,8 @@ fn run_window(
             if ui.handle_event(&event, &mut params) {
                 continue;
             }
+            // Controller connect/disconnect — open/close pads without interrupting event handling.
+            gfx.gamepads.handle_event(&event);
             match event {
                 Event::Quit { .. }
                 | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'main,
@@ -425,6 +428,10 @@ fn run_window(
                 logic_accum -= LOGIC_DT;
             }
         }
+
+        // Publish current controller state for the core's input_state callback. Runs after the
+        // event pump (which refreshes SDL's controller state) and before the core reads input.
+        gfx.gamepads.poll();
 
         // Run one core frame (only once a game is loaded — running a core with no game crashes).
         if let (Some(c), true) = (&core, game_loaded) {

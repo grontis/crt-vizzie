@@ -7,3 +7,11 @@
 # build, so the variable is simply ignored there.
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+# Tune codegen for the Pi 5's Cortex-A76 (same CPU the libretro core is built with,
+# `-mcpu=cortex-a76`). This lets the FFT, the per-cell trig in the wave layer, and the tight
+# glitch/decay loops use the A76's NEON feature set instead of generic aarch64. Gated to the
+# Pi target triple, so the Windows/x86 dev build is unaffected. Applies to both a native build
+# on the Pi and an aarch64 cross-build.
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=cortex-a76"]

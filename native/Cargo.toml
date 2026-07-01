@@ -52,3 +52,13 @@ rppal = "0.19"
 # A fully-unoptimized core runs unbearably slowly; opt-level 1 keeps emulation usable
 # while preserving fast incremental builds for the frontend code.
 opt-level = 1
+
+[profile.release]
+# Deployment profile (Raspberry Pi kiosk). Build time is irrelevant at deploy, so trade it
+# for runtime: cross-crate inlining (LTO + a single codegen unit) speeds up the per-tick
+# fusion loops and the FFT; abort-on-panic drops unwinding tables (a panic should just kill
+# the kiosk, not unwind through the unsafe libretro FFI). Pairs with target-cpu=cortex-a76
+# from .cargo/config.toml. Does not affect `cargo test`, which uses the dev profile.
+lto = "thin"
+codegen-units = 1
+panic = "abort"

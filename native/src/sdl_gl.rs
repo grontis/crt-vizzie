@@ -5,6 +5,8 @@ pub struct Gfx {
     pub gl: glow::Context,
     pub window: Window,
     pub event_pump: EventPump,
+    // Opened game controllers; polled each frame to feed the libretro core (crate::input).
+    pub gamepads: crate::input::Gamepads,
 
     // Kept alive for the lifetime of the window. Declared after `window`/`gl` so they
     // drop first; SDL + the GL context tear down last.
@@ -63,11 +65,13 @@ impl Gfx {
         }
 
         let event_pump = sdl.event_pump()?;
+        let gamepads = crate::input::Gamepads::new(&sdl)?;
 
         Ok(Gfx {
             gl,
             window,
             event_pump,
+            gamepads,
             _gl_ctx: gl_ctx,
             _video: video,
             _sdl: sdl,

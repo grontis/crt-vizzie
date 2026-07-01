@@ -31,11 +31,34 @@ For the full Windows setup (Rust + MSVC, SDL2, getting a Windows core), see
 
 ## Build & run
 
+For development (fast incremental builds, unoptimized):
+
 ```sh
 cd native
 cargo run -- --core /path/to/core --rom /path/to/game.z64
 cargo run -- --core /path/to/core --rom /path/to/game.z64 --demo-mode  # synthetic audio
 ```
+
+For Pi deployment, build optimized — the release profile (LTO + single codegen unit) and
+`target-cpu=cortex-a76` tuning matter for the per-frame fusion loops and the FFT. Use the
+helper, which builds `--release` and runs the resulting binary:
+
+```sh
+cd native
+./scripts/run-release.sh /path/to/game.z64                      # bare ROM → default core in ./cores/
+./scripts/run-release.sh --core ./cores/foo.so --rom game.z64   # explicit core, extra args forwarded
+```
+
+Equivalently, by hand:
+
+```sh
+cargo build --release
+./target/release/crt-vizzie --core ./cores/mupen64plus_next_libretro.so --rom game.z64
+```
+
+The N64 render back-end is Angrylion software RDP (multithreaded) + cxd4 RSP — see
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) ("core configuration") for the option details and why the
+GLideN64 GPU path is not currently usable.
 
 ## Controls
 

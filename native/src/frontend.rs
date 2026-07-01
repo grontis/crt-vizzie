@@ -301,13 +301,26 @@ unsafe extern "C" fn audio_sample_batch(_data: *const i16, frames: usize) -> usi
     frames
 }
 
-const FB_EMULATION_OFF: &[u8] = b"False\0";
+// Option values handed back to the core. All are NUL-terminated so the pointer we publish into
+// `retro_variable.value` stays valid for the core to read after we return (it points at static
+// memory).
 const CPU_DYNAREC: &[u8] = b"dynamic_recompiler\0";
-const RDP_ANGRYLION: &[u8] = b"angrylion\0";
-const RSP_HLE: &[u8] = b"hle\0";
 const THREADED_RENDERER_OFF: &[u8] = b"False\0";
+const RDP_ANGRYLION: &[u8] = b"angrylion\0";
+const RSP_CXD4: &[u8] = b"cxd4\0";
+const ANGRYLION_MULTITHREAD_ALL: &[u8] = b"all threads\0";
+const ANGRYLION_SYNC_LOW: &[u8] = b"Low\0";
+const ASTICK_SENSITIVITY: &[u8] = b"100\0";
+const ASTICK_DEADZONE: &[u8] = b"15\0";
 
 /// Override specific core options; return false for everything else (core uses its default).
+///
+/// The render back-end is Angrylion software RDP + cxd4 software RSP. The GPU path (GLideN64 +
+/// HLE RSP) was tested and is NOT usable with this core build (`2.8-GLES3 98c1b0d`): it aborts on
+/// the first display list in `TextureCache::_addTexture` (`free(): invalid pointer`) — a
+/// heap-corruption bug in GLideN64 on aarch64/GLES3 Mesa, confirmed by backtrace, not fixable via
+/// any core option. Re-enabling GPU rendering requires a newer/patched core, not a frontend
+/// change. See ARCHITECTURE.md ("core configuration").
 unsafe fn get_variable(data: *mut c_void) -> bool {
     if data.is_null() {
         return false;
@@ -317,29 +330,35 @@ unsafe fn get_variable(data: *mut c_void) -> bool {
         return false;
     }
     let key = std::ffi::CStr::from_ptr(var.key).to_string_lossy();
-    // Force the aarch64 dynamic recompiler — the core's built-in default may not pick it.
-    if key == "mupen64plus-cpucore" {
-        var.value = CPU_DYNAREC.as_ptr() as *const c_char;
-        return true;
+
+    // Helper: publish a static value string and report it as handled.
+    let set = |var: &mut retro_variable, val: &'static [u8]| {
+        var.value = val.as_ptr() as *const c_char;
+        true
+    };
+
+    match key.as_ref() {
+        // Force the aarch64 dynamic recompiler — the core's default may not pick it.
+        "mupen64plus-cpucore" => set(var, CPU_DYNAREC),
+        // Threaded renderer off: it spawns a renderer thread that would contend with our single
+        // GL context (FBO publish / context_reset run on the main thread).
+        "mupen64plus-ThreadedRenderer" => set(var, THREADED_RENDERER_OFF),
+        // Software RDP; cxd4 is the only LLE RSP that works here (HLE forces a parallel-RSP
+        // fallback the core warns about, and parallel-RSP's JIT fails mprotect on Pi 5).
+        "mupen64plus-rdp-plugin" => set(var, RDP_ANGRYLION),
+        "mupen64plus-rsp-plugin" | "mupen64plus-rspplugin" => set(var, RSP_CXD4),
+        // Spread the software RDP across all cores (3 sit idle single-threaded) and relax
+        // inter-thread sync — the game is a backdrop, so the small accuracy cost is fine.
+        "mupen64plus-angrylion-multithread" => set(var, ANGRYLION_MULTITHREAD_ALL),
+        "mupen64plus-angrylion-sync" => set(var, ANGRYLION_SYNC_LOW),
+        // The core scales the N64 control stick by astick-sensitivity and reads it ONLY from these
+        // variables — if the frontend returns nothing, both stay at their C-global 0, so the stick
+        // is scaled to zero (dead) with no deadzone. A real frontend hands back the option default;
+        // we must too. 100% sensitivity / 15% deadzone are the core's normal defaults.
+        "mupen64plus-astick-sensitivity" => set(var, ASTICK_SENSITIVITY),
+        "mupen64plus-astick-deadzone" => set(var, ASTICK_DEADZONE),
+        _ => false,
     }
-    // Use Angrylion software RDP instead of GLideN64 — GLideN64's TextureCache has a
-    // heap-corruption bug (free() on invalid pointer) in the GLES3/Mesa path on Pi 5.
-    // Angrylion delivers CPU-rendered frames via video_refresh, matching parallel_n64's path.
-    if key == "mupen64plus-rdp-plugin" {
-        var.value = RDP_ANGRYLION.as_ptr() as *const c_char;
-        return true;
-    }
-    // Use cxd4 software RSP interpreter — paraLLEl-RSP JIT fails mprotect(PROT_EXEC) on Pi 5.
-    if key == "mupen64plus-rsp-plugin" || key == "mupen64plus-rspplugin" {
-        var.value = b"cxd4\0".as_ptr() as *const c_char;
-        return true;
-    }
-    // Disable threaded renderer — we don't need it for the software path.
-    if key == "mupen64plus-ThreadedRenderer" {
-        var.value = THREADED_RENDERER_OFF.as_ptr() as *const c_char;
-        return true;
-    }
-    false
 }
 
 // Non-variadic shim for the core's variadic log callback — prints just the (unexpanded) format
@@ -352,12 +371,14 @@ unsafe extern "C" fn core_log(level: c_uint, fmt: *const c_char) {
     eprint!("[core:{level}] {s}");
 }
 
+// Input state is published each frame by the main thread (crate::input) and read here on the
+// core's emu thread, so polling is a no-op — the table is always current.
 unsafe extern "C" fn input_poll() {}
 unsafe extern "C" fn input_state(
-    _port: c_uint,
-    _device: c_uint,
-    _index: c_uint,
-    _id: c_uint,
+    port: c_uint,
+    device: c_uint,
+    index: c_uint,
+    id: c_uint,
 ) -> i16 {
-    0
+    crate::input::state(port, device, index, id)
 }
