@@ -187,7 +187,7 @@ impl DebugUi {
 
         Ok(Self {
             program, vao, vbo, atlas_tex, u_viewport, u_tex, u_use_tex, m, char_map,
-            verts: Vec::new(), visible: true, dragging: None,
+            verts: Vec::new(), visible: false, dragging: None,
         })
     }
 

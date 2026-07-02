@@ -37,6 +37,7 @@ struct Args {
     core: Option<PathBuf>,
     rom: Option<PathBuf>,
     demo: bool,
+    fullscreen: bool,
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -102,22 +103,25 @@ mod tests {
 }
 
 fn print_usage() {
-    eprintln!("usage: crt-vizzie [--core <libretro-core>] [--rom <rom>] [--demo-mode]");
-    eprintln!("  --core      load the libretro core (else ./cores/<platform-default>)");
-    eprintln!("  --rom       game ROM to run and visualize");
-    eprintln!("  --demo-mode synthetic animated audio source, ignores live audio input");
+    eprintln!("usage: crt-vizzie [--core <libretro-core>] [--rom <rom>] [--demo-mode] [--fullscreen]");
+    eprintln!("  --core       load the libretro core (else ./cores/<platform-default>)");
+    eprintln!("  --rom        game ROM to run and visualize");
+    eprintln!("  --demo-mode  synthetic animated audio source, ignores live audio input");
+    eprintln!("  --fullscreen start in borderless desktop fullscreen (toggle at runtime with F)");
 }
 
 fn parse_args() -> Args {
     let mut core = None;
     let mut rom = None;
     let mut demo = false;
+    let mut fullscreen = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--core" => core = it.next().map(PathBuf::from),
             "--rom" => rom = it.next().map(PathBuf::from),
             "--demo-mode" => demo = true,
+            "--fullscreen" => fullscreen = true,
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -125,7 +129,7 @@ fn parse_args() -> Args {
             other => eprintln!("[crt] ignoring unknown arg: {other}"),
         }
     }
-    Args { core, rom, demo }
+    Args { core, rom, demo, fullscreen }
 }
 
 fn main() -> ExitCode {
@@ -155,7 +159,7 @@ fn main() -> ExitCode {
         }
     };
 
-    if let Err(e) = run_window(core, args.rom, args.demo) {
+    if let Err(e) = run_window(core, args.rom, args.demo, args.fullscreen) {
         eprintln!("[crt] fatal: {e}");
         return ExitCode::FAILURE;
     }
@@ -166,11 +170,20 @@ fn run_window(
     core: Option<libretro::Core>,
     rom: Option<PathBuf>,
     demo: bool,
+    fullscreen: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use glow::HasContext;
 
     let mut gfx = sdl_gl::Gfx::new("crt-vizzie", 1280, 720)?;
     println!("[crt] GL_VERSION: {}", gfx.gl_version());
+
+    // Optional borderless desktop fullscreen at launch (matches the runtime F-key toggle). Applied
+    // before the size-dependent renderer/post setup below so they allocate for the display size.
+    if fullscreen {
+        if let Err(e) = gfx.window.set_fullscreen(sdl2::video::FullscreenType::Desktop) {
+            eprintln!("[crt] fullscreen at launch failed: {e}");
+        }
+    }
 
     // Register callbacks + initialize the core. The GL context (created above) must exist first:
     // the core requests a hardware-render context to share via SET_HW_RENDER during load_game,

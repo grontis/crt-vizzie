@@ -37,7 +37,11 @@ For development (fast incremental builds, unoptimized):
 cd native
 cargo run -- --core /path/to/core --rom /path/to/game.z64
 cargo run -- --core /path/to/core --rom /path/to/game.z64 --demo-mode  # synthetic audio
+cargo run -- --core /path/to/core --rom /path/to/game.z64 --fullscreen # launch fullscreen
 ```
+
+Flags: `--demo-mode` uses the synthetic audio source, and `--fullscreen` starts in borderless
+desktop fullscreen (equivalent to pressing F at runtime).
 
 For Pi deployment, build optimized — the release profile (LTO + single codegen unit) and
 `target-cpu=cortex-a76` tuning matter for the per-frame fusion loops and the FFT. Use the
@@ -68,5 +72,5 @@ GLideN64 GPU path is not currently usable.
 | S | Cycle scanline mode (off → pixel → cell-gap → smooth) |
 | B | Toggle the game underlay (glyphs over the game vs. glyphs on black) |
 | F | Toggle fullscreen |
-| U | Toggle the debug slider panel (live param tuning) |
+| U | Toggle the debug slider panel (live param tuning; hidden at launch) |
 | Esc | Quit |
