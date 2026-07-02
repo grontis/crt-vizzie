@@ -476,7 +476,7 @@ impl Fusion {
         // Debug instrumentation (env-gated, ~1×/sec). Run with CRT_AUDIO_DEBUG=1 to enable.
         if audio.live
             && (self.now_ms % 1000.0) < (1000.0 / 30.0)
-            && std::env::var("CRT_AUDIO_DEBUG").is_ok()
+            && crate::audio::audio_debug_enabled()
         {
             eprintln!("[idledbg] target={:.3} activity={:.3} beat_int={:.2}",
                 activity_target, activity, audio.beat_intensity);

@@ -1,8 +1,16 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::config::{FFT_SIZE, FFT_BINS, FFT_SMOOTHING, BEAT_THRESHOLD, BEAT_HISTORY, BEAT_COOLDOWN_MS};
+
+/// Whether `CRT_AUDIO_DEBUG` enables the audio/idle diagnostic prints. Read from the
+/// environment once (env vars are fixed at launch) and cached; shared by `audio.rs` and
+/// `fusion.rs` so both gate on the same flag without re-reading the environment each tick.
+pub fn audio_debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CRT_AUDIO_DEBUG").is_some())
+}
 
 // ── Public trait ──────────────────────────────────────────────────────────────
 
@@ -243,7 +251,7 @@ impl AudioSource for CpalAudioSource {
         }
         // Debug instrumentation (env-gated, ~1×/sec). Run with CRT_AUDIO_DEBUG=1 to enable.
         let audio_dbg = (self.now_ms % 1000.0) < (1000.0 / 30.0)
-            && std::env::var("CRT_AUDIO_DEBUG").is_ok();
+            && audio_debug_enabled();
 
         // Not enough data yet — all outputs stay at zero.
         if self.sample_buf.len() < FFT_SIZE {
