@@ -32,12 +32,13 @@ The defining property of the design is that its three inputs are fully decoupled
 ```
   N64 core ─────► game texture ───┐
   USB line-in ──► FFT/bands/beat ─┼─► fusion → composite shader ─► display
-  pi/bridge.py ─► params ─────────┘
+  GPIO panel ───► params ─────────┘
 ```
 
 - **Game** = silent visual wallpaper. The core's audio batch is **discarded** (game is visual-only).
 - **Live audio** from a USB audio interface drives reactivity (NOT game audio, NOT mic/file/demo).
-- **Hardware bridge** (`pi/bridge.py`, unchanged) drives tunable params over WebSocket.
+- **Hardware panel** (MCP3008 knobs + GPIO buttons, read in-process by `hw_input.rs`) drives
+  tunable params. See [HARDWARE_SETUP.md](HARDWARE_SETUP.md) for wiring and mapping.
 
 There is **no luma coupling and no game-audio coupling**. The bgAscii layer (which
 is the only consumer of game-frame luma) is off by default and deferred.
@@ -67,13 +68,11 @@ is the only consumer of game-frame luma) is off by default and deferred.
 ```rust
 loop {
     poll_events();                          // quit + key handlers (P/S/F/V…)
-    bridge.drain_into(&mut params);         // apply queued hw / hw_event messages
-
-    core.retro_run();                       // emu at CORE fps; renders into our FBO; AUDIO BATCH DISCARDED
 
     accum += dt;                            // fixed-timestep LOGIC @ 30 Hz
     while accum >= 1.0 / 30.0 {
         audio.update();                     // cpal ring → FFT → spectrum/bands/beat
+        hw.poll(&mut params, audio.bands());// knobs → params; buttons → actions; bands → LEDs
         // per-frame glue from sketch.js (NOT in fusion):
         params.chroma_beat_current =
             params.chroma_beat_current * 0.85
@@ -82,10 +81,11 @@ loop {
         accum -= 1.0 / 30.0;
     }
 
+    core.retro_run();                       // emu at CORE fps; renders into our FBO; AUDIO BATCH DISCARDED
+
     renderer.upload(&fusion.char_idx, &fusion.bright16, &fusion.cga_idx);
     renderer.render(&params, game_tex);     // composite, single draw call
     swap();
-    bridge.maybe_send_audio(&audio);        // {beatActive,beatIntensity,bands} @~16Hz → LEDs
 }
 ```
 
@@ -169,24 +169,32 @@ input devices; select the USB interface by name.
 
 ---
 
-## Hardware bridge: the direction wrinkle
+## Hardware panel: in-process GPIO, no bridge
 
-`pi/bridge.py` is the WebSocket **server** (`ws://localhost:9001`); the browser was the client.
-So `bridge.rs` is a **client** (`tokio-tungstenite`) and `pi/bridge.py` stays unchanged.
+The `v2/` web app needed a separate bridge process (`pi/bridge.py`, a WebSocket server)
+because a browser cannot touch SPI or GPIO. The native binary has no such restriction, so
+the bridge is gone entirely: `hw_input.rs` opens SPI0/CE0 and the GPIO pins itself via
+`rppal` and is polled once per 30 Hz logic tick. A knob turn is an SPI read followed by a
+plain field write into `Params` — no IPC, no JSON, no second process. (`pi/bridge.py` remains
+in the repo only for the `v2/` browser app; the native binary never talks to it.)
 
-It must faithfully replicate `setV2Param`:
-- clamp to `RANGES`;
-- treat keys ending `Enabled` as booleans;
-- reject NaN / ∞;
-- round when both bounds are integers and span > 1;
-- enforce `rainSpeedMin < rainSpeedMax − 0.05`.
+What `poll()` does each tick:
+- **Knobs** — read each mapped MCP3008 channel (~70 µs total at 1 MHz), gate through a
+  dead-zone (Δ > 0.005 full-scale, mirroring bridge.py), smooth with a first-order low-pass
+  (`Params::hw_knob_alpha`, default 0.35), clamp to the entry's range, write the field.
+  Params keep their defaults until a knob physically moves — no slam at boot.
+- **Buttons** — drain edge events from a background interrupt thread (mpsc), 50 ms software
+  debounce, fire the mapped action on press.
+- **LEDs** — set each of the six band LEDs high/low from the current audio band levels.
 
-And send `{type:"audio", beatActive, beatIntensity, bands}` back at ~16 Hz to drive the LEDs.
+The two GPIO buttons are remapped from their v2 events (`next_bg` / `toggle_bg_ascii`, both
+meaningless natively — the game *is* the background and bgAscii is deferred): GPIO 23 cycles
+the phosphor preset (P-key analog), GPIO 24 toggles the game underlay (B-key analog).
 
-**Button remap needed:** the two GPIO buttons fire `next_bg` and `toggle_bg_ascii`. With the
-playlist gone (the game *is* the background) and bgAscii deferred, `next_bg` is meaningless.
-Repurpose both (e.g. cycle phosphor / toggle scanline) — one-line changes in `pi/bridge.py`'s
-`BUTTON_CONFIG` and the `bridge.rs` event map.
+Off-Pi (or on any GPIO init failure) the factory falls back to a no-op stub, same pattern as
+the audio source — the app runs with keyboard control only. The mapping tables (`KNOBS`,
+`BUTTONS`, `LEDS`) at the top of `hw_input.rs` are the single edit point for rewiring;
+wiring, pinout, and remapping instructions live in [HARDWARE_SETUP.md](HARDWARE_SETUP.md).
 
 ---
 
@@ -302,18 +310,25 @@ effects) would need `DEPTH24_STENCIL8` + `DEPTH_STENCIL_ATTACHMENT`.
 **Audio input device selection.** `audio.rs` opens only cpal's default input device — no
 enumeration, no CLI flag. Selecting a specific USB interface by name is future work.
 
-**LED dimming.** The GPIO LED bank (`hw_input.rs`) is threshold on/off only; software-PWM
-brightness is future work.
+**LED dimming.** The GPIO LED bank (`hw_input.rs`) is threshold on/off only; the v2 bridge did
+PWM brightness. rppal's software PWM (`OutputPin::set_pwm_frequency`) is the path to parity.
 
-**Hardware bridge.** A `bridge.rs` WebSocket client (to `pi/bridge.py`, sending audio bands back
-at ~16 Hz for the LEDs) is not yet implemented; live params currently come from the local GPIO
-path and keyboard.
+**Second MCP3008.** `hw_input.rs` opens SPI0/CE0 only; the `KnobEntry.chip` field exists for a
+second chip on CE1 but is not yet read. Needed once more than 8 analog channels are wired.
+
+**Unmapped knob channels.** MCP3008 CH2 and CH5 (v2's `bgFxHueShift` / `bgAsciiLevel`) have no
+native param and are no-ops. Candidates for remap: `edge_gain` / `edge_threshold` /
+`glitch_fx_master`.
+
+**Knob soft-takeover.** A knob's first move past the dead-zone jumps the param to the knob's
+absolute position, discarding any keyboard/UI-set value. A pickup mode (knob must cross the
+current value before grabbing it) would avoid the jump.
 
 **Kiosk deployment.** Pi 5 autostart, overclock, and boot-to-fullscreen are not yet scripted.
 
 ## Cargo dependencies
 
 Current: `sdl2`, `glow`, `libloading`, `cpal`, `rustfft`, `image`, `serde`, `serde_json`
-(+ `rppal` on Linux/Pi for GPIO). The libretro ABI is transcribed by hand in `libretro.rs`
-rather than via a generated-bindings crate. The hardware bridge, when built, will add
-`tokio` + `tokio-tungstenite`.
+(+ `rppal` on Linux for the Pi's SPI/GPIO — `>= 0.19` required for the Pi 5's RP1 I/O
+controller). The libretro ABI is transcribed by hand in `libretro.rs` rather than via a
+generated-bindings crate.

@@ -2,6 +2,16 @@
 
 Audio-reactive ASCII visualizer for CRT TV. WebGL 2 renderer — runs at 30+ fps on Raspberry Pi 5.
 
+Two implementations live in this repo:
+
+- **`v2/`** — the browser app documented below (WebGL 2, backgrounds from local media files).
+  Hardware knobs/buttons require the `pi/bridge.py` WebSocket bridge described in this README.
+- **`native/`** — a native Rust port that composites the visualizer over live N64 emulation
+  and talks to the hardware panel directly (no bridge). See `native/README.md`,
+  `native/ARCHITECTURE.md`, and `native/HARDWARE_SETUP.md`.
+
+Everything below this point describes the `v2/` browser app.
+
 ---
 
 ## Running locally

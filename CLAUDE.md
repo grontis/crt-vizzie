@@ -9,12 +9,17 @@ Read it before touching any code.
 
 ```
 crt-vizzie/
-  v2/              active application (WebGL 2 ASCII visualizer)
-  pi/              hardware bridge for Raspberry Pi (bridge.py, HARDWARE_SETUP.md, pi-start.sh)
+  v2/              browser application (WebGL 2 ASCII visualizer) — behavioral source of truth
+  native/          native Rust port: N64 libretro frontend + visualizer (see native/ARCHITECTURE.md)
+  pi/              v2-only hardware bridge (bridge.py, HARDWARE_SETUP.md, pi-start.sh)
   README.md        user-facing overview
 ```
 
 There is no v1 directory on this branch. There is no `modes/` directory. There is no p5.js.
+
+The `pi/` bridge serves **only the `v2/` browser app** (a browser cannot touch SPI/GPIO).
+The native app reads the same hardware directly in-process via `native/src/hw_input.rs` and
+never talks to `bridge.py` — see `native/HARDWARE_SETUP.md`. `pi/` stays until `v2/` is retired.
 
 ---
 
@@ -251,6 +256,9 @@ what the code does and why, as if it had always existed.
 - The `pi/bridge.py` knob/button → V2_PARAMS mapping lives in the `CHANNELS` and
   `BUTTON_CONFIG` lists at the top of that file. There is no `hw-mapping.json` and
   no `FUSION_PARAM_RANGES` — use `V2_PARAM_RANGES` from `v2/config.js`.
+- The native app's hardware mapping is separate: the `KNOBS` / `BUTTONS` / `LEDS` tables
+  at the top of `native/src/hw_input.rs`. Do not add a bridge or WebSocket path to the
+  native app — it owns SPI/GPIO directly.
 
 ---
 

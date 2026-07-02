@@ -3,6 +3,9 @@
 This guide wires your physical controls into crt-vizzie's `V2_PARAMS` system via
 the `bridge.py` WebSocket bridge.
 
+> **Scope: `v2/` browser app only.** The native app (`native/`) reads the same hardware
+> directly in-process and does not use `bridge.py` — see `native/HARDWARE_SETUP.md`.
+
 ---
 
 ## Your components
