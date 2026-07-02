@@ -414,12 +414,14 @@ impl AsciiRenderer {
             self.scratch[i * 4 + 2] = b[0];
             self.scratch[i * 4 + 3] = b[1];
         }
+        // Storage is allocated once in resize(); update in place (tex_sub_image_2d) each frame —
+        // the realloc form (tex_image_2d) can stall/re-validate on the V3D/Mesa driver.
         gl.bind_texture(glow::TEXTURE_2D, Some(self.data_tex));
-        gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RG16UI as i32, self.cols as i32, self.rows as i32,
-            0, glow::RG_INTEGER, glow::UNSIGNED_SHORT, Some(&self.scratch));
+        gl.tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, self.cols as i32, self.rows as i32,
+            glow::RG_INTEGER, glow::UNSIGNED_SHORT, glow::PixelUnpackData::Slice(&self.scratch));
         gl.bind_texture(glow::TEXTURE_2D, Some(self.color_tex));
-        gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::R8 as i32, self.cols as i32, self.rows as i32,
-            0, glow::RED, glow::UNSIGNED_BYTE, Some(cga_idx));
+        gl.tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, self.cols as i32, self.rows as i32,
+            glow::RED, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(cga_idx));
     }
 
     /// Mask pre-pass: compute the per-cell game edge/dark mask + cell color into `mask_tex`

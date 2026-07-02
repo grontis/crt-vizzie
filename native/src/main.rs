@@ -293,6 +293,10 @@ fn run_window(
         }
         t
     };
+    // (w, h, fmt) the software texture's storage was last allocated for. tex_image_2d only re-runs
+    // when this changes (first frame or an N64 resolution/format switch); otherwise the per-frame
+    // upload is an in-place tex_sub_image_2d.
+    let mut sw_tex_alloc: Option<(i32, i32, u32)> = None;
 
     // Audio source: --demo-mode → synthetic source; else open the default cpal input, falling
     // back to a silent (blank/idle) source if no device is available.
@@ -465,7 +469,8 @@ fn run_window(
         } else if let Some(t) = sw_tex {
             // Software CPU frame: top-left origin → v-flip. Dims + bytes captured under one lock.
             let uploaded = frontend::with_sw_frame(|w, h, buf| unsafe {
-                upload_sw_texture(&gfx.gl, t, w as i32, h as i32, frontend::pixel_format(), buf);
+                upload_sw_texture(&gfx.gl, t, w as i32, h as i32, frontend::pixel_format(), buf,
+                    &mut sw_tex_alloc);
             });
             if uploaded.is_some() {
                 (Some(t), 1.0, 1.0, 1.0_f32)
@@ -524,48 +529,56 @@ unsafe fn upload_sw_texture(
     h: i32,
     fmt: u32,
     buf: &[u8],
+    alloc: &mut Option<(i32, i32, u32)>,
 ) {
     use glow::HasContext;
     gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-    match fmt {
+
+    // (internal_format, client_format, client_type) for this libretro pixel format. The client
+    // format/type must be identical between the storage-allocating tex_image_2d and the per-frame
+    // tex_sub_image_2d update.
+    let (internal, client, ty): (i32, u32, u32) = match fmt {
         // XRGB8888: little-endian bytes in memory are [B, G, R, X].
         1 => {
+            // GLES3 has no GL_BGRA client format: upload as RGBA and swap R↔B via swizzle (set on
+            // (re)allocation below); desktop GL takes BGRA directly.
             #[cfg(target_os = "windows")]
-            gl.tex_image_2d(
-                glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w, h, 0,
-                glow::BGRA, glow::UNSIGNED_BYTE, Some(buf),
-            );
+            let t = (glow::RGBA8 as i32, glow::BGRA, glow::UNSIGNED_BYTE);
             #[cfg(not(target_os = "windows"))]
-            {
-                // GLES3 has no GL_BGRA client format. Upload as RGBA (GL sees the bytes as
-                // R=B_val, G=G_val, B=R_val) and use texture swizzle to swap R↔B.
-                gl.tex_image_2d(
-                    glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w, h, 0,
-                    glow::RGBA, glow::UNSIGNED_BYTE, Some(buf),
-                );
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_SWIZZLE_R, glow::BLUE as i32);
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_SWIZZLE_B, glow::RED as i32);
-            }
+            let t = (glow::RGBA8 as i32, glow::RGBA, glow::UNSIGNED_BYTE);
+            t
         }
         // RGB565 — supported natively in both desktop GL and GLES3.
-        2 => gl.tex_image_2d(
-            glow::TEXTURE_2D, 0, glow::RGB as i32, w, h, 0,
-            glow::RGB, glow::UNSIGNED_SHORT_5_6_5, Some(buf),
-        ),
-        // 0RGB1555: desktop GL uses BGRA+UNSIGNED_SHORT_1_5_5_5_REV.
-        // GLES3 lacks that combo; upload as RGB5_A1 which accepts the same 5-5-5-1 bit layout.
+        2 => (glow::RGB as i32, glow::RGB, glow::UNSIGNED_SHORT_5_6_5),
+        // 0RGB1555: desktop GL uses BGRA+UNSIGNED_SHORT_1_5_5_5_REV; GLES3 lacks that combo and
+        // uses RGB5_A1, which accepts the same 5-5-5-1 bit layout.
         _ => {
             #[cfg(target_os = "windows")]
-            gl.tex_image_2d(
-                glow::TEXTURE_2D, 0, glow::RGB5_A1 as i32, w, h, 0,
-                glow::BGRA, glow::UNSIGNED_SHORT_1_5_5_5_REV, Some(buf),
-            );
+            let t = (glow::RGB5_A1 as i32, glow::BGRA, glow::UNSIGNED_SHORT_1_5_5_5_REV);
             #[cfg(not(target_os = "windows"))]
-            gl.tex_image_2d(
-                glow::TEXTURE_2D, 0, glow::RGB5_A1 as i32, w, h, 0,
-                glow::RGBA, glow::UNSIGNED_SHORT_5_5_5_1, Some(buf),
-            );
+            let t = (glow::RGB5_A1 as i32, glow::RGBA, glow::UNSIGNED_SHORT_5_5_5_1);
+            t
         }
+    };
+
+    if *alloc == Some((w, h, fmt)) {
+        // Storage already matches — update in place. The realloc form (tex_image_2d) can stall and
+        // re-validate on the V3D/Mesa driver.
+        gl.tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, w, h, client, ty,
+            glow::PixelUnpackData::Slice(buf));
+    } else {
+        // First frame, or an N64 resolution/format switch — (re)allocate storage.
+        gl.tex_image_2d(glow::TEXTURE_2D, 0, internal, w, h, 0, client, ty, Some(buf));
+        // GLES3 swizzle: XRGB8888 needs R↔B, every other format is identity. Set explicitly so a
+        // format switch can't leave a stale swizzle. A texture parameter — persists across the
+        // subsequent per-frame tex_sub_image_2d updates, so it only needs setting on (re)alloc.
+        #[cfg(not(target_os = "windows"))]
+        {
+            let (sr, sb) = if fmt == 1 { (glow::BLUE, glow::RED) } else { (glow::RED, glow::BLUE) };
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_SWIZZLE_R, sr as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_SWIZZLE_B, sb as i32);
+        }
+        *alloc = Some((w, h, fmt));
     }
 }
 

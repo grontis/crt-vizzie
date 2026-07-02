@@ -85,18 +85,13 @@ fn char_idx_or_warn(
     }
 }
 
-/// Return a random atlas index from the katakana pool.
-fn katakana_idx(rng: &mut Xorshift32, pool: &[char], char_map: &HashMap<char, u16>) -> u16 {
+/// Pick a random atlas index from a pool of precomputed atlas indices.
+/// The pools (katakana, glitch chars) are resolved through `char_map` once at
+/// construction, so this hot-path call is an RNG draw plus an array index — no hashing.
+fn pool_idx(rng: &mut Xorshift32, pool: &[u16]) -> u16 {
     if pool.is_empty() { return 0; }
     let i = (rng.rand() * pool.len() as f32) as usize % pool.len();
-    *char_map.get(&pool[i]).unwrap_or(&0)
-}
-
-/// Return a random atlas index from the glitch char pool.
-fn gli_char_idx(rng: &mut Xorshift32, gli: &[char], char_map: &HashMap<char, u16>) -> u16 {
-    if gli.is_empty() { return 0; }
-    let i = (rng.rand() * gli.len() as f32) as usize % gli.len();
-    *char_map.get(&gli[i]).unwrap_or(&0)
+    pool[i]
 }
 
 /// Stamp a random figure into the figure layer buffers.
@@ -250,9 +245,9 @@ pub struct Fusion {
     cols: usize,
     rows: usize,
 
-    // character pools (built once at construction)
-    katakana_pool: Vec<char>,
-    gli_chars:     Vec<char>,
+    // character pools as atlas indices (resolved through char_map once at construction)
+    katakana_atlas: Vec<u16>,
+    gli_atlas:      Vec<u16>,
 
     // char → atlas-index map (built from renderer charset)
     char_map: HashMap<char, u16>,
@@ -316,8 +311,10 @@ impl Fusion {
             .filter_map(|(i, s)| s.chars().next().map(|c| (c, i as u16)))
             .collect();
 
-        let katakana_pool: Vec<char> = crate::config::KATAKANA.to_vec();
-        let gli_chars: Vec<char>     = crate::config::GLI_CHARS.chars().collect();
+        let katakana_atlas: Vec<u16> = crate::config::KATAKANA.iter()
+            .map(|&c| char_map.get(&c).copied().unwrap_or(0)).collect();
+        let gli_atlas: Vec<u16> = crate::config::GLI_CHARS.chars()
+            .map(|c| char_map.get(&c).copied().unwrap_or(0)).collect();
 
         let mut rng = Xorshift32::new(0xDEAD_BEEF);
         let mut warned_missing = HashSet::new();
@@ -335,7 +332,7 @@ impl Fusion {
         // Pre-fill wave chars with random katakana
         let mut wave_char_idx = vec![0u16; n];
         for i in 0..n {
-            wave_char_idx[i] = katakana_idx(&mut rng, &katakana_pool, &char_map);
+            wave_char_idx[i] = pool_idx(&mut rng, &katakana_atlas);
         }
 
         // Figure buffers (stamp_figure writes the initial figure below)
@@ -351,7 +348,7 @@ impl Fusion {
 
         Fusion {
             cols, rows,
-            katakana_pool, gli_chars, char_map,
+            katakana_atlas, gli_atlas, char_map,
             char_idx:  vec![0u16; n],
             bright16:  vec![0u16; n],
             cga_idx:   vec![0u8; n],
@@ -405,7 +402,7 @@ impl Fusion {
         // Wave layer
         self.wave_char_idx = vec![0u16; n];
         for i in 0..n {
-            self.wave_char_idx[i] = katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map);
+            self.wave_char_idx[i] = pool_idx(&mut self.rng, &self.katakana_atlas);
         }
         self.wave_time        = 0.0;
         self.wave_beat_boost  = 0.0;
@@ -712,7 +709,7 @@ impl Fusion {
                         let gr  = (self.rng.rand() * rows as f32) as usize % rows;
                         let gc  = (self.rng.rand() * cols as f32) as usize % cols;
                         let idx = gr * cols + gc;
-                        self.glitch_char[idx]  = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                        self.glitch_char[idx]  = pool_idx(&mut self.rng, &self.gli_atlas);
                         self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
                         self.glitch_bright[idx] = 0.4 + self.rng.rand() * 0.5;
                     }
@@ -726,7 +723,7 @@ impl Fusion {
                     let blast_start = (self.rng.rand() * max_start as f32) as usize % max_start;
                     for bc in blast_start..(blast_start + blast_len).min(cols) {
                         let idx = blast_row * cols + bc;
-                        self.glitch_char[idx]  = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                        self.glitch_char[idx]  = pool_idx(&mut self.rng, &self.gli_atlas);
                         self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
                         self.glitch_bright[idx] = 0.75 + self.rng.rand() * 0.25;
                     }
@@ -772,7 +769,7 @@ impl Fusion {
                     let idx = gr as usize * cols + gc as usize;
                     let brt = (0.4 + self.rng.rand() * 0.6) * density * intensity;
                     if brt > self.glitch_bright[idx] {
-                        self.glitch_char[idx]    = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                        self.glitch_char[idx]    = pool_idx(&mut self.rng, &self.gli_atlas);
                         self.glitch_cga_idx[idx] = (color_base + (self.rng.rand() * 4.0) as u8) % 16;
                         self.glitch_bright[idx]  = brt;
                     }
@@ -787,7 +784,7 @@ impl Fusion {
                     let nr  = (self.rng.rand() * rows as f32) as usize % rows;
                     let nc  = (self.rng.rand() * cols as f32) as usize % cols;
                     let idx = nr * cols + nc;
-                    self.glitch_char[idx]    = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                    self.glitch_char[idx]    = pool_idx(&mut self.rng, &self.gli_atlas);
                     self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
                     self.glitch_bright[idx]  = 0.3 + self.rng.rand() * 0.5;
                 }
@@ -840,7 +837,7 @@ impl Fusion {
                     if new_brt > 0.1 {
                         let subst = self.rng.rand();
                         if subst < subst_rate {
-                            self.glitch_char[idx]    = gli_char_idx(&mut self.rng, &self.gli_chars, &self.char_map);
+                            self.glitch_char[idx]    = pool_idx(&mut self.rng, &self.gli_atlas);
                             self.glitch_cga_idx[idx] = (self.rng.rand() * 16.0) as u8;
                         }
                     }
@@ -933,7 +930,7 @@ impl Fusion {
                         let roll = self.rng.rand();
                         if roll < params.wave_char_rate {
                             self.wave_char_idx[idx] =
-                                katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map);
+                                pool_idx(&mut self.rng, &self.katakana_atlas);
                         }
                         let wave_ch = self.wave_char_idx[idx];
                         set_cell_by_idx(
@@ -974,14 +971,14 @@ impl Fusion {
                             if interact_roll < params.rain_interact {
                                 self.figure_char[cell_idx]
                             } else {
-                                katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map)
+                                pool_idx(&mut self.rng, &self.katakana_atlas)
                             }
                         } else {
-                            katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map)
+                            pool_idx(&mut self.rng, &self.katakana_atlas)
                         };
                         (ch, 1.0_f32)
                     } else {
-                        let ch = katakana_idx(&mut self.rng, &self.katakana_pool, &self.char_map);
+                        let ch = pool_idx(&mut self.rng, &self.katakana_atlas);
                         let b  = (1.0 - t as f32 / params.rain_trail as f32) * (0.5 + 0.5 * bin_e);
                         (ch, b.max(0.0))
                     };
@@ -1068,7 +1065,7 @@ mod tests {
     /// Build a minimal charset covering ASCII printable + katakana range.
     fn make_charset() -> Vec<String> {
         let mut cs: Vec<String> = (32u8..=126u8).map(|b| (b as char).to_string()).collect();
-        // Add katakana block (needed so katakana_idx doesn't always return 0)
+        // Add katakana block (needed so the katakana pool doesn't resolve to all-0)
         for cp in 0x30A0u32..=0x30FFu32 {
             if let Some(ch) = char::from_u32(cp) {
                 cs.push(ch.to_string());
